@@ -73552,8 +73552,8 @@ async function reviewPullRequest(input) {
         }))
     ];
     const workerResults = await Promise.all(workerRuns);
-    const reviewResults = workerResults.filter((result) => result.category === "review");
-    const codeQualityResults = workerResults.filter((result) => result.category === "code-quality");
+    const reviewResults = workerResults.filter((result) => result.category === "review" && !result.skipped);
+    const codeQualityResults = workerResults.filter((result) => result.category === "code-quality" && !result.skipped);
     const [reviewConsolidation, codeQualityConsolidation] = await Promise.all([
         consolidateCategory("review", reviewResults.map((result) => result.output), input, model),
         consolidateCategory("code-quality", codeQualityResults.map((result) => result.output), input, model)
@@ -73596,33 +73596,48 @@ function selectInlineComments(findings, commentableLines, maxComments) {
     return { comments, skippedCommentCount };
 }
 async function runWorkerAgent(args) {
-    const agent = new ToolLoopAgent({
-        model: args.model,
-        tools: args.tools,
-        instructions: buildWorkerInstructions(args.category, args.passNumber),
-        temperature: 0.2,
-        stopWhen: stepCountIs(8)
-    });
-    const result = await agent.generate({
-        prompt: `${args.basePrompt}
+    try {
+        const agent = new ToolLoopAgent({
+            model: args.model,
+            tools: args.tools,
+            instructions: buildWorkerInstructions(args.category, args.passNumber),
+            temperature: 0.2,
+            stopWhen: stepCountIs(8)
+        });
+        const result = await agent.generate({
+            prompt: `${args.basePrompt}
 
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
-    });
-    return {
-        category: args.category,
-        output: await parseAgentReviewResultText(result.text, args.model, args.category)
-    };
+        });
+        return {
+            category: args.category,
+            output: parseAgentReviewResultText(result.text, args.category),
+            skipped: false
+        };
+    }
+    catch (error) {
+        const message = review_formatError(error);
+        return {
+            category: args.category,
+            output: {
+                summary: `${args.category} pass ${args.passNumber} was skipped after an error: ${message}`,
+                findings: []
+            },
+            skipped: true
+        };
+    }
 }
 async function consolidateCategory(category, results, input, model) {
     if (results.length === 0) {
         return {
-            summary: `No ${category} reviewers were run.`,
+            summary: `No valid ${category} reviewer outputs were available.`,
             findings: []
         };
     }
-    const { text } = await generateText({
-        model,
-        system: `You consolidate ${category} reviewer outputs for Code Beat.
+    try {
+        const { text } = await generateText({
+            model,
+            system: `You consolidate ${category} reviewer outputs for Code Beat.
 
 Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
 Preserve only findings that are useful as pull request review feedback.
@@ -73630,19 +73645,25 @@ Keep exact file paths and added-line numbers when present.
 Return a concise summary and a ranked findings list.
 Return JSON only, with shape:
 {"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}`,
-        prompt: `Pull request: ${input.owner}/${input.repo}#${input.prNumber}
+            prompt: `Pull request: ${input.owner}/${input.repo}#${input.prNumber}
 Title: ${input.title}
 
 Reviewer outputs:
 ${JSON.stringify(results, null, 2)}`,
-        temperature: 0
-    });
-    return parseAgentReviewResultText(text, model, category);
+            temperature: 0
+        });
+        return parseAgentReviewResultText(text, category);
+    }
+    catch (error) {
+        return mergeAgentResults(category, results, `${category} consolidation was skipped after an error: ${review_formatError(error)}`);
+    }
 }
 async function consolidateFinalReview(args) {
-    const { text } = await generateText({
-        model: args.model,
-        system: `You are the final Code Beat review orchestrator.
+    const fallbackFindings = [...args.reviewConsolidation.findings, ...args.codeQualityConsolidation.findings];
+    try {
+        const { text } = await generateText({
+            model: args.model,
+            system: `You are the final Code Beat review orchestrator.
 
 Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
 Remove overlap across categories.
@@ -73657,7 +73678,7 @@ Score from 0 to 5:
 - 5: no clear concerns
 Return JSON only, with shape:
 {"score": number, "summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string}]}`,
-        prompt: `Pull request: ${args.input.owner}/${args.input.repo}#${args.input.prNumber}
+            prompt: `Pull request: ${args.input.owner}/${args.input.repo}#${args.input.prNumber}
 Title: ${args.input.title}
 
 Review consolidation:
@@ -73665,12 +73686,13 @@ ${JSON.stringify(args.reviewConsolidation, null, 2)}
 
 Code-quality consolidation:
 ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
-        temperature: 0
-    });
-    return parseReviewResultText(text, args.model, [
-        ...args.reviewConsolidation.findings,
-        ...args.codeQualityConsolidation.findings
-    ]);
+            temperature: 0
+        });
+        return parseReviewResultText(text, fallbackFindings);
+    }
+    catch (error) {
+        return buildFallbackReview(fallbackFindings, `Final consolidation was skipped after an error: ${review_formatError(error)}`);
+    }
 }
 function buildWorkerInstructions(category, passNumber) {
     if (category === "code-quality") {
@@ -73742,71 +73764,25 @@ function parseJsonObject(text) {
         throw new Error("Model response did not contain a valid JSON object.");
     }
 }
-async function parseAgentReviewResultText(text, model, category) {
-    try {
-        return normalizeAgentReviewResult(parseJsonObject(text));
-    }
-    catch (error) {
-        try {
-            const repaired = await repairJsonOutput({
-                model,
-                schemaDescription: '{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}',
-                text
-            });
-            return normalizeAgentReviewResult(parseJsonObject(repaired));
-        }
-        catch {
-            return {
-                summary: `${category} reviewer produced unparseable output and was skipped: ${error instanceof Error ? error.message : String(error)}`,
-                findings: []
-            };
-        }
-    }
+function parseAgentReviewResultText(text, category) {
+    return normalizeAgentReviewResult(parseJsonObject(text), category);
 }
-async function parseReviewResultText(text, model, fallbackFindings) {
+function parseReviewResultText(text, fallbackFindings) {
     try {
         return normalizeReviewResult(parseJsonObject(text));
     }
     catch {
-        try {
-            const repaired = await repairJsonOutput({
-                model,
-                schemaDescription: '{"score": number, "summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string}]}',
-                text
-            });
-            return normalizeReviewResult(parseJsonObject(repaired));
-        }
-        catch {
-            const findings = fallbackFindings.map((finding) => normalizeFinding(finding)).filter((finding) => finding !== undefined);
-            return {
-                score: findings.length > 0 ? 2 : 5,
-                summary: findings.length > 0
-                    ? "Code Beat found review concerns, but the final scoring response was not parseable. Posting normalized consolidated findings."
-                    : "Code Beat did not find parseable review findings.",
-                findings
-            };
-        }
+        return buildFallbackReview(fallbackFindings, "Final review response was not parseable.");
     }
 }
-async function repairJsonOutput(args) {
-    const { text } = await generateText({
-        model: args.model,
-        system: "Convert malformed model output into valid JSON only. Do not add commentary.",
-        prompt: `Return valid JSON matching this shape:
-${args.schemaDescription}
-
-Malformed output:
-${args.text}`,
-        temperature: 0
-    });
-    return text;
-}
-function normalizeAgentReviewResult(value) {
+function normalizeAgentReviewResult(value, defaultCategory) {
     const input = asRecord(value);
     const findings = Array.isArray(input.findings) ? input.findings : [];
     return agentReviewSchema.parse({
         summary: truncate(String(input.summary ?? "No summary provided."), 3000),
-        findings: findings.map((finding) => normalizeAgentFinding(finding)).filter((finding) => finding !== undefined)
+        findings: findings
+            .map((finding) => normalizeAgentFinding(finding, defaultCategory))
+            .filter((finding) => finding !== undefined)
     });
 }
 function normalizeReviewResult(value) {
@@ -73818,7 +73794,7 @@ function normalizeReviewResult(value) {
         findings: findings.map((finding) => normalizeFinding(finding)).filter((finding) => finding !== undefined)
     });
 }
-function normalizeAgentFinding(value) {
+function normalizeAgentFinding(value, defaultCategory) {
     const finding = normalizeFinding(value);
     if (!finding) {
         return undefined;
@@ -73826,13 +73802,81 @@ function normalizeAgentFinding(value) {
     const input = asRecord(value);
     const rawConfidence = Number(input.confidence ?? 0.7);
     const confidence = rawConfidence > 1 && rawConfidence <= 100 ? rawConfidence / 100 : rawConfidence;
-    const category = input.category === "review" || input.category === "code-quality" ? input.category : "review";
+    const category = input.category === "review" || input.category === "code-quality" ? input.category : defaultCategory;
     return {
         ...finding,
         confidence: Math.min(1, Math.max(0, Number.isFinite(confidence) ? confidence : 0.7)),
         evidence: truncate(String(input.evidence ?? finding.body), 1500),
         category
     };
+}
+function mergeAgentResults(category, results, summaryPrefix) {
+    const findings = [];
+    const seen = new Set();
+    for (const result of results) {
+        for (const finding of result.findings) {
+            const normalized = normalizeAgentFinding(finding, category);
+            if (!normalized) {
+                continue;
+            }
+            const key = `${normalized.path}:${normalized.line}:${normalized.title.toLowerCase()}`;
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            findings.push(normalized);
+        }
+    }
+    findings.sort((left, right) => {
+        const severityDelta = severityRank(right.severity) - severityRank(left.severity);
+        if (severityDelta !== 0) {
+            return severityDelta;
+        }
+        return right.confidence - left.confidence;
+    });
+    return agentReviewSchema.parse({
+        summary: truncate(`${summaryPrefix} Using ${findings.length} normalized finding(s) from valid ${category} outputs.`, 3000),
+        findings
+    });
+}
+function buildFallbackReview(fallbackFindings, reason) {
+    const findings = [];
+    const seen = new Set();
+    for (const finding of fallbackFindings) {
+        const normalized = normalizeFinding(finding);
+        if (!normalized) {
+            continue;
+        }
+        const key = `${normalized.path}:${normalized.line}:${normalized.title.toLowerCase()}`;
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        findings.push(normalized);
+    }
+    findings.sort((left, right) => severityRank(right.severity) - severityRank(left.severity));
+    return {
+        score: findings.length > 0 ? 2 : 5,
+        summary: findings.length > 0
+            ? `${reason} Posting normalized consolidated findings.`
+            : `${reason} Code Beat did not find usable review findings.`,
+        findings
+    };
+}
+function severityRank(severity) {
+    if (severity === "blocker") {
+        return 3;
+    }
+    if (severity === "major") {
+        return 2;
+    }
+    return 1;
+}
+function review_formatError(error) {
+    if (error instanceof Error) {
+        return error.message;
+    }
+    return String(error);
 }
 function normalizeFinding(value) {
     const input = asRecord(value);
