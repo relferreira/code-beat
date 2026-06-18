@@ -1,0 +1,32 @@
+{
+  "name": "code-beat",
+  "version": "0.1.0",
+  "description": "GitHub Action that reviews pull requests with OpenRouter and scores maintainability from 0 to 5.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && ncc build lib/index.js --license licenses.txt --out dist",
+    "check": "tsc --noEmit",
+    "test": "rm -rf test-dist && tsc -p tsconfig.test.json && node --test test-dist/tests/*.test.js"
+  },
+  "keywords": [
+    "github-action",
+    "pull-request",
+    "code-review",
+    "openrouter",
+    "ai-sdk"
+  ],
+  "author": "relferreira",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/github": "^9.1.1",
+    "@openrouter/ai-sdk-provider": "^2.9.1",
+    "ai": "^6.0.208",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.8.3"
+  }
+}

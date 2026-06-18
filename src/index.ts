@@ -1,0 +1,139 @@
+import * as github from "@actions/github";
+import { getInput, setFailed, setOutput } from "./action-core.js";
+import { formatInlineComment, formatReviewBody } from "./format.js";
+import { reviewPullRequest } from "./review.js";
+import type { PullRequestFile } from "./diff.js";
+
+async function run(): Promise<void> {
+  try {
+    const pullRequest = github.context.payload.pull_request;
+    if (!pullRequest) {
+      setFailed("Code Beat only runs on pull_request events.");
+      return;
+    }
+
+    const apiKey = getInput("openrouter-api-key", { required: true });
+    const model = getInput("model", { required: true });
+    const token = getInput("github-token") || process.env.GITHUB_TOKEN;
+    if (!token) {
+      setFailed("A GitHub token is required. Pass github-token or set GITHUB_TOKEN.");
+      return;
+    }
+
+    const maxComments = parseIntegerInput("max-comments", 12);
+    const failOnScoreBelow = parseOptionalNumberInput("fail-on-score-below");
+    const octokit = github.getOctokit(token);
+    const { owner, repo } = github.context.repo;
+    const prNumber = pullRequest.number;
+
+    const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: 100
+    });
+
+    const review = await reviewPullRequest({
+      apiKey,
+      model,
+      owner,
+      repo,
+      prNumber,
+      title: pullRequest.title,
+      body: pullRequest.body ?? "",
+      author: pullRequest.user?.login ?? "unknown",
+      baseRef: pullRequest.base.ref,
+      headRef: pullRequest.head.ref,
+      files: files.map(toPullRequestFile),
+      maxComments
+    });
+
+    const body = formatReviewBody({
+      result: review.result,
+      postedComments: review.comments,
+      skippedCommentCount: review.skippedCommentCount,
+      truncatedDiff: review.truncatedDiff
+    });
+
+    if (review.comments.length > 0) {
+      await octokit.rest.pulls.createReview({
+        owner,
+        repo,
+        pull_number: prNumber,
+        event: "COMMENT",
+        body,
+        comments: review.comments.map((comment) => ({
+          path: comment.path,
+          line: comment.line,
+          side: "RIGHT",
+          body: formatInlineComment(comment)
+        }))
+      });
+    } else {
+      await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body
+      });
+    }
+
+    setOutput("score", String(review.result.score));
+    setOutput("summary", review.result.summary);
+    setOutput("inline-comments", String(review.comments.length));
+
+    if (failOnScoreBelow !== undefined && review.result.score < failOnScoreBelow) {
+      setFailed(`Code Beat score ${review.result.score}/5 is below threshold ${failOnScoreBelow}.`);
+    }
+  } catch (error) {
+    setFailed(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function toPullRequestFile(file: {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  changes: number;
+  patch?: string;
+}): PullRequestFile {
+  return {
+    filename: file.filename,
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    changes: file.changes,
+    patch: file.patch
+  };
+}
+
+function parseIntegerInput(name: string, fallback: number): number {
+  const value = getInput(name);
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer.`);
+  }
+
+  return parsed;
+}
+
+function parseOptionalNumberInput(name: string): number | undefined {
+  const value = getInput(name);
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 5) {
+    throw new Error(`${name} must be a number between 0 and 5.`);
+  }
+
+  return parsed;
+}
+
+void run();
