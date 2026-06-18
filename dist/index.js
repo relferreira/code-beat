@@ -73608,7 +73608,10 @@ async function runWorkerAgent(args) {
 
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
     });
-    return { category: args.category, output: parseAgentReviewResult(result.text) };
+    return {
+        category: args.category,
+        output: await parseAgentReviewResultText(result.text, args.model, args.category)
+    };
 }
 async function consolidateCategory(category, results, input, model) {
     if (results.length === 0) {
@@ -73634,7 +73637,7 @@ Reviewer outputs:
 ${JSON.stringify(results, null, 2)}`,
         temperature: 0
     });
-    return parseAgentReviewResult(text);
+    return parseAgentReviewResultText(text, model, category);
 }
 async function consolidateFinalReview(args) {
     const { text } = await generateText({
@@ -73664,7 +73667,10 @@ Code-quality consolidation:
 ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
         temperature: 0
     });
-    return normalizeReviewResult(parseJsonObject(text));
+    return parseReviewResultText(text, args.model, [
+        ...args.reviewConsolidation.findings,
+        ...args.codeQualityConsolidation.findings
+    ]);
 }
 function buildWorkerInstructions(category, passNumber) {
     if (category === "code-quality") {
@@ -73736,8 +73742,64 @@ function parseJsonObject(text) {
         throw new Error("Model response did not contain a valid JSON object.");
     }
 }
-function parseAgentReviewResult(text) {
-    return normalizeAgentReviewResult(parseJsonObject(text));
+async function parseAgentReviewResultText(text, model, category) {
+    try {
+        return normalizeAgentReviewResult(parseJsonObject(text));
+    }
+    catch (error) {
+        try {
+            const repaired = await repairJsonOutput({
+                model,
+                schemaDescription: '{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}',
+                text
+            });
+            return normalizeAgentReviewResult(parseJsonObject(repaired));
+        }
+        catch {
+            return {
+                summary: `${category} reviewer produced unparseable output and was skipped: ${error instanceof Error ? error.message : String(error)}`,
+                findings: []
+            };
+        }
+    }
+}
+async function parseReviewResultText(text, model, fallbackFindings) {
+    try {
+        return normalizeReviewResult(parseJsonObject(text));
+    }
+    catch {
+        try {
+            const repaired = await repairJsonOutput({
+                model,
+                schemaDescription: '{"score": number, "summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string}]}',
+                text
+            });
+            return normalizeReviewResult(parseJsonObject(repaired));
+        }
+        catch {
+            const findings = fallbackFindings.map((finding) => normalizeFinding(finding)).filter((finding) => finding !== undefined);
+            return {
+                score: findings.length > 0 ? 2 : 5,
+                summary: findings.length > 0
+                    ? "Code Beat found review concerns, but the final scoring response was not parseable. Posting normalized consolidated findings."
+                    : "Code Beat did not find parseable review findings.",
+                findings
+            };
+        }
+    }
+}
+async function repairJsonOutput(args) {
+    const { text } = await generateText({
+        model: args.model,
+        system: "Convert malformed model output into valid JSON only. Do not add commentary.",
+        prompt: `Return valid JSON matching this shape:
+${args.schemaDescription}
+
+Malformed output:
+${args.text}`,
+        temperature: 0
+    });
+    return text;
 }
 function normalizeAgentReviewResult(value) {
     const input = asRecord(value);
