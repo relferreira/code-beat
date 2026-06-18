@@ -2,7 +2,7 @@ import { appendFileSync } from "node:fs";
 import { EOL } from "node:os";
 
 export function getInput(name: string, options?: { required?: boolean }): string {
-  const envName = `INPUT_${name.replace(/ /g, "_").replace(/-/g, "_").toUpperCase()}`;
+  const envName = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
   const value = process.env[envName]?.trim() ?? "";
 
   if (options?.required && !value) {

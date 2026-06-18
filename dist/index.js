@@ -36597,7 +36597,7 @@ const external_node_os_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import
 
 
 function getInput(name, options) {
-    const envName = `INPUT_${name.replace(/ /g, "_").replace(/-/g, "_").toUpperCase()}`;
+    const envName = `INPUT_${name.replace(/ /g, "_").toUpperCase()}`;
     const value = process.env[envName]?.trim() ?? "";
     if (options?.required && !value) {
         throw new Error(`Input required and not supplied: ${name}`);
