@@ -1,4 +1,4 @@
-import { generateObject, Output, stepCountIs, ToolLoopAgent } from "ai";
+import { generateText, stepCountIs, ToolLoopAgent } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { SYSTEM_PROMPT } from "./prompt.js";
 import { buildDiffContext, type PullRequestFile } from "./diff.js";
@@ -158,10 +158,6 @@ async function runWorkerAgent(args: {
     model: args.model,
     tools: args.tools,
     instructions: buildWorkerInstructions(args.category, args.passNumber),
-    output: Output.object({
-      schema: agentReviewSchema,
-      name: `${args.category}-findings`
-    }),
     temperature: 0.2,
     stopWhen: stepCountIs(8)
   });
@@ -172,7 +168,7 @@ async function runWorkerAgent(args: {
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
   });
 
-  return { category: args.category, output: result.output };
+  return { category: args.category, output: parseAgentReviewResult(result.text) };
 }
 
 async function consolidateCategory(
@@ -188,15 +184,16 @@ async function consolidateCategory(
     };
   }
 
-  const { object } = await generateObject({
+  const { text } = await generateText({
     model,
-    schema: agentReviewSchema,
     system: `You consolidate ${category} reviewer outputs for Code Beat.
 
 Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
 Preserve only findings that are useful as pull request review feedback.
 Keep exact file paths and added-line numbers when present.
-Return a concise summary and a ranked findings list.`,
+Return a concise summary and a ranked findings list.
+Return JSON only, with shape:
+{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}`,
     prompt: `Pull request: ${input.owner}/${input.repo}#${input.prNumber}
 Title: ${input.title}
 
@@ -205,7 +202,7 @@ ${JSON.stringify(results, null, 2)}`,
     temperature: 0
   });
 
-  return object;
+  return parseAgentReviewResult(text);
 }
 
 async function consolidateFinalReview(args: {
@@ -214,9 +211,8 @@ async function consolidateFinalReview(args: {
   input: ReviewInput;
   model: ReturnType<ReturnType<typeof createOpenRouter>["chat"]>;
 }): Promise<ReviewResult> {
-  const { object } = await generateObject({
+  const { text } = await generateText({
     model: args.model,
-    schema: reviewSchema,
     system: `You are the final Code Beat review orchestrator.
 
 Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
@@ -230,7 +226,8 @@ Score from 0 to 5:
 - 3: acceptable with notable improvements
 - 4: good with minor concerns
 - 5: no clear concerns
-Return only structured data matching the schema.`,
+Return JSON only, with shape:
+{"score": number, "summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string}]}`,
     prompt: `Pull request: ${args.input.owner}/${args.input.repo}#${args.input.prNumber}
 Title: ${args.input.title}
 
@@ -242,7 +239,7 @@ ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
     temperature: 0
   });
 
-  return object;
+  return reviewSchema.parse(parseJsonObject(text));
 }
 
 function buildWorkerInstructions(category: ReviewCategory, passNumber: number): string {
@@ -298,9 +295,36 @@ Inline comment rules:
 - Use the exact file path and new-line number from the diff.
 - Keep comments specific, actionable, and focused on issues worth raising.
 - Prefer fewer high-conviction findings over many weak comments.
+- Return JSON only, with shape:
+{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}
 
 Changed files:
 ${diff}`;
+}
+
+export function parseJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/.exec(trimmed);
+    if (fenced?.[1]) {
+      return JSON.parse(fenced[1]);
+    }
+
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start !== -1 && end > start) {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    }
+
+    throw new Error("Model response did not contain a valid JSON object.");
+  }
+}
+
+function parseAgentReviewResult(text: string): AgentReviewResult {
+  return agentReviewSchema.parse(parseJsonObject(text));
 }
 
 function buildPrDetails(input: ReviewInput, truncatedDiff: boolean) {

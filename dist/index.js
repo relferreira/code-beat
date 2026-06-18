@@ -37020,10 +37020,10 @@ function isJSONValue(value) {
   }
   return false;
 }
-function isJSONArray(value) {
+function dist_isJSONArray(value) {
   return Array.isArray(value) && value.every(isJSONValue);
 }
-function isJSONObject(value) {
+function dist_isJSONObject(value) {
   return value != null && typeof value === "object" && Object.entries(value).every(
     ([key, val]) => typeof key === "string" && (val === void 0 || isJSONValue(val))
   );
@@ -63947,10 +63947,10 @@ var objectOutputStrategy = (schema) => ({
     };
   },
   async validateFinalResult(value) {
-    return safeValidateTypes({ value, schema });
+    return safeValidateTypes5({ value, schema });
   },
   createElementStream() {
-    throw new UnsupportedFunctionalityError({
+    throw new UnsupportedFunctionalityError3({
       functionality: "element streams in object mode"
     });
   }
@@ -63983,7 +63983,7 @@ var arrayOutputStrategy = (schema) => {
       if (!isJSONObject(value) || !isJSONArray(value.elements)) {
         return {
           success: false,
-          error: new TypeValidationError({
+          error: new TypeValidationError4({
             value,
             cause: "value must be an object that contains an array of elements"
           })
@@ -63993,7 +63993,7 @@ var arrayOutputStrategy = (schema) => {
       const resultArray = [];
       for (let i = 0; i < inputArray.length; i++) {
         const element = inputArray[i];
-        const result = await safeValidateTypes({ value: element, schema });
+        const result = await safeValidateTypes5({ value: element, schema });
         if (i === inputArray.length - 1 && !isFinalDelta) {
           continue;
         }
@@ -64026,7 +64026,7 @@ var arrayOutputStrategy = (schema) => {
       if (!isJSONObject(value) || !isJSONArray(value.elements)) {
         return {
           success: false,
-          error: new TypeValidationError({
+          error: new TypeValidationError4({
             value,
             cause: "value must be an object that contains an array of elements"
           })
@@ -64035,7 +64035,7 @@ var arrayOutputStrategy = (schema) => {
       const inputArray = value.elements;
       const resultArray = [];
       for (const element of inputArray) {
-        const result = await safeValidateTypes({ value: element, schema });
+        const result = await safeValidateTypes5({ value: element, schema });
         if (!result.success) {
           return result;
         }
@@ -64094,7 +64094,7 @@ var enumOutputStrategy = (enumValues) => {
       if (!isJSONObject(value) || typeof value.result !== "string") {
         return {
           success: false,
-          error: new TypeValidationError({
+          error: new TypeValidationError4({
             value,
             cause: 'value must be an object that contains a string in the "result" property.'
           })
@@ -64103,7 +64103,7 @@ var enumOutputStrategy = (enumValues) => {
       const result = value.result;
       return enumValues.includes(result) ? { success: true, value: result } : {
         success: false,
-        error: new TypeValidationError({
+        error: new TypeValidationError4({
           value,
           cause: "value must be a string in the enum"
         })
@@ -64113,7 +64113,7 @@ var enumOutputStrategy = (enumValues) => {
       if (!isJSONObject(value) || typeof value.result !== "string") {
         return {
           success: false,
-          error: new TypeValidationError({
+          error: new TypeValidationError4({
             value,
             cause: 'value must be an object that contains a string in the "result" property.'
           })
@@ -64126,7 +64126,7 @@ var enumOutputStrategy = (enumValues) => {
       if (value.result.length === 0 || possibleEnumValues.length === 0) {
         return {
           success: false,
-          error: new TypeValidationError({
+          error: new TypeValidationError4({
             value,
             cause: "value must be a string in the enum"
           })
@@ -64141,7 +64141,7 @@ var enumOutputStrategy = (enumValues) => {
       };
     },
     createElementStream() {
-      throw new UnsupportedFunctionalityError({
+      throw new UnsupportedFunctionalityError3({
         functionality: "element streams in enum mode"
       });
     }
@@ -64154,9 +64154,9 @@ function getOutputStrategy({
 }) {
   switch (output) {
     case "object":
-      return objectOutputStrategy(asSchema(schema));
+      return objectOutputStrategy(asSchema5(schema));
     case "array":
-      return arrayOutputStrategy(asSchema(schema));
+      return arrayOutputStrategy(asSchema5(schema));
     case "enum":
       return enumOutputStrategy(enumValues);
     case "no-schema":
@@ -64172,7 +64172,7 @@ function getOutputStrategy({
 
 
 async function parseAndValidateObjectResult(result, outputStrategy, context2) {
-  const parseResult = await safeParseJSON({ text: result });
+  const parseResult = await safeParseJSON4({ text: result });
   if (!parseResult.success) {
     throw new NoObjectGeneratedError({
       message: "No object generated: could not parse the response.",
@@ -64207,7 +64207,7 @@ async function parseAndValidateObjectResultWithRepair(result, outputStrategy, re
   try {
     return await parseAndValidateObjectResult(result, outputStrategy, context2);
   } catch (error) {
-    if (repairText != null && NoObjectGeneratedError.isInstance(error) && (JSONParseError.isInstance(error.cause) || TypeValidationError.isInstance(error.cause))) {
+    if (repairText != null && NoObjectGeneratedError.isInstance(error) && (JSONParseError2.isInstance(error.cause) || TypeValidationError5.isInstance(error.cause))) {
       const repairedText = await repairText({
         text: result,
         error: error.cause
@@ -64390,7 +64390,7 @@ async function generateObject(options) {
     enumValues
   });
   const callSettings = prepareCallSettings(settings);
-  const headersWithUserAgent = withUserAgentSuffix(
+  const headersWithUserAgent = withUserAgentSuffix6(
     headers != null ? headers : {},
     `ai/${ai_dist_VERSION}`
   );
@@ -73600,10 +73600,6 @@ async function runWorkerAgent(args) {
         model: args.model,
         tools: args.tools,
         instructions: buildWorkerInstructions(args.category, args.passNumber),
-        output: output_exports.object({
-            schema: agentReviewSchema,
-            name: `${args.category}-findings`
-        }),
         temperature: 0.2,
         stopWhen: stepCountIs(8)
     });
@@ -73612,7 +73608,7 @@ async function runWorkerAgent(args) {
 
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
     });
-    return { category: args.category, output: result.output };
+    return { category: args.category, output: parseAgentReviewResult(result.text) };
 }
 async function consolidateCategory(category, results, input, model) {
     if (results.length === 0) {
@@ -73621,15 +73617,16 @@ async function consolidateCategory(category, results, input, model) {
             findings: []
         };
     }
-    const { object } = await generateObject({
+    const { text } = await generateText({
         model,
-        schema: agentReviewSchema,
         system: `You consolidate ${category} reviewer outputs for Code Beat.
 
 Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
 Preserve only findings that are useful as pull request review feedback.
 Keep exact file paths and added-line numbers when present.
-Return a concise summary and a ranked findings list.`,
+Return a concise summary and a ranked findings list.
+Return JSON only, with shape:
+{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}`,
         prompt: `Pull request: ${input.owner}/${input.repo}#${input.prNumber}
 Title: ${input.title}
 
@@ -73637,12 +73634,11 @@ Reviewer outputs:
 ${JSON.stringify(results, null, 2)}`,
         temperature: 0
     });
-    return object;
+    return parseAgentReviewResult(text);
 }
 async function consolidateFinalReview(args) {
-    const { object } = await generateObject({
+    const { text } = await generateText({
         model: args.model,
-        schema: reviewSchema,
         system: `You are the final Code Beat review orchestrator.
 
 Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
@@ -73656,7 +73652,8 @@ Score from 0 to 5:
 - 3: acceptable with notable improvements
 - 4: good with minor concerns
 - 5: no clear concerns
-Return only structured data matching the schema.`,
+Return JSON only, with shape:
+{"score": number, "summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string}]}`,
         prompt: `Pull request: ${args.input.owner}/${args.input.repo}#${args.input.prNumber}
 Title: ${args.input.title}
 
@@ -73667,7 +73664,7 @@ Code-quality consolidation:
 ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
         temperature: 0
     });
-    return object;
+    return reviewSchema.parse(parseJsonObject(text));
 }
 function buildWorkerInstructions(category, passNumber) {
     if (category === "code-quality") {
@@ -73715,9 +73712,32 @@ Inline comment rules:
 - Use the exact file path and new-line number from the diff.
 - Keep comments specific, actionable, and focused on issues worth raising.
 - Prefer fewer high-conviction findings over many weak comments.
+- Return JSON only, with shape:
+{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}
 
 Changed files:
 ${diff}`;
+}
+function parseJsonObject(text) {
+    const trimmed = text.trim();
+    try {
+        return JSON.parse(trimmed);
+    }
+    catch {
+        const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/.exec(trimmed);
+        if (fenced?.[1]) {
+            return JSON.parse(fenced[1]);
+        }
+        const start = trimmed.indexOf("{");
+        const end = trimmed.lastIndexOf("}");
+        if (start !== -1 && end > start) {
+            return JSON.parse(trimmed.slice(start, end + 1));
+        }
+        throw new Error("Model response did not contain a valid JSON object.");
+    }
+}
+function parseAgentReviewResult(text) {
+    return agentReviewSchema.parse(parseJsonObject(text));
 }
 function buildPrDetails(input, truncatedDiff) {
     return {
