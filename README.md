@@ -22,10 +22,10 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: relferreira/code-beat@v1
+      - uses: actions/checkout@v4
+      - uses: relferreira/code-beat@main
         with:
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-          model: anthropic/claude-sonnet-4
 ```
 
 ## Inputs
@@ -33,7 +33,9 @@ jobs:
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
 | `openrouter-api-key` | yes | | OpenRouter API key. |
-| `model` | yes | | OpenRouter model name. |
+| `model` | no | `deepseek/deepseek-v4-flash` | OpenRouter model name. |
+| `review-runs` | no | `2` | Number of independent general PR reviewer agents to run. |
+| `code-quality-runs` | no | `2` | Number of independent thermo-nuclear code-quality reviewer agents to run. |
 | `github-token` | no | `${{ github.token }}` | Token used to read PR files and create comments. |
 | `max-comments` | no | `12` | Maximum number of inline comments to post. |
 | `fail-on-score-below` | no | | Optional threshold between 0 and 5. The action fails when the score is below this value. |

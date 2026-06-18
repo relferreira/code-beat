@@ -43766,7 +43766,7 @@ function createAbortError() {
 }
 
 // src/delayed-promise.ts
-var dist_DelayedPromise = class {
+var DelayedPromise = class {
   constructor() {
     this.status = { type: "pending" };
     this._resolve = void 0;
@@ -45877,7 +45877,7 @@ function jsonSchema(jsonSchema2, {
 function isSchema(value) {
   return typeof value === "object" && value !== null && schemaSymbol in value && value[schemaSymbol] === true && "jsonSchema" in value && "validate" in value;
 }
-function dist_asSchema(schema) {
+function asSchema(schema) {
   return schema == null ? jsonSchema({ properties: {}, additionalProperties: false }) : isSchema(schema) ? schema : "~standard" in schema ? schema["~standard"].vendor === "zod" ? zodSchema(schema) : standardSchema(schema) : schema();
 }
 function standardSchema(standardSchema2) {
@@ -45949,7 +45949,7 @@ function zodSchema(zodSchema2, options) {
 }
 
 // src/validate-types.ts
-async function dist_validateTypes({
+async function validateTypes({
   value,
   schema,
   context
@@ -45965,7 +45965,7 @@ async function safeValidateTypes({
   schema,
   context
 }) {
-  const actualSchema = dist_asSchema(schema);
+  const actualSchema = asSchema(schema);
   try {
     if (actualSchema.validate == null) {
       return { success: true, value, rawValue: value };
@@ -45998,7 +45998,7 @@ async function parseJSON({
     if (schema == null) {
       return value;
     }
-    return dist_validateTypes({ value, schema });
+    return validateTypes({ value, schema });
   } catch (error) {
     if (JSONParseError.isInstance(error) || TypeValidationError.isInstance(error)) {
       throw error;
@@ -46428,7 +46428,7 @@ function isAsyncIterable(obj) {
 }
 
 // src/types/execute-tool.ts
-async function* dist_executeTool({
+async function* executeTool({
   execute,
   input,
   options
@@ -55576,7 +55576,7 @@ async function createToolModelOutput({
   errorMode
 }) {
   if (errorMode === "text") {
-    return { type: "error-text", value: getErrorMessage3(output) };
+    return { type: "error-text", value: getErrorMessage(output) };
   } else if (errorMode === "json") {
     return { type: "error-json", value: toJSONValue(output) };
   }
@@ -56909,10 +56909,10 @@ function canonicalJSON(value) {
   return `{${entries.join(",")}}`;
 }
 function toBase64url(bytes) {
-  return convertUint8ArrayToBase643(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return convertUint8ArrayToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 function fromBase64url(str) {
-  return convertBase64ToUint8Array4(str);
+  return convertBase64ToUint8Array(str);
 }
 async function importKey(secret) {
   const keyData = typeof secret === "string" ? encoder.encode(secret) : secret;
@@ -57019,9 +57019,9 @@ async function validateApprovedToolApprovals({
       }
     }
     if (tool2 != null && typeof tool2.execute === "function" && tool2.inputSchema != null) {
-      const validation = await safeValidateTypes2({
+      const validation = await safeValidateTypes({
         value: toolCall.input,
-        schema: asSchema2(tool2.inputSchema)
+        schema: asSchema(tool2.inputSchema)
       });
       if (!validation.success) {
         throw new InvalidToolInputError({
@@ -57440,7 +57440,7 @@ var dist_object = ({
   name: name22,
   description
 }) => {
-  const schema = dist_asSchema(inputSchema);
+  const schema = asSchema(inputSchema);
   return {
     name: "object",
     responseFormat: resolve(schema.jsonSchema).then((jsonSchema2) => ({
@@ -57503,7 +57503,7 @@ var dist_array = ({
   name: name22,
   description
 }) => {
-  const elementSchema = dist_asSchema(inputElementSchema);
+  const elementSchema = asSchema(inputElementSchema);
   return {
     name: "array",
     // JSON schema that describes an array of elements:
@@ -57762,7 +57762,7 @@ async function parseToolCall({
           tools,
           inputSchema: async ({ toolName }) => {
             const { inputSchema } = tools[toolName];
-            return await asSchema4(inputSchema).jsonSchema;
+            return await asSchema(inputSchema).jsonSchema;
           },
           system,
           messages,
@@ -57780,7 +57780,7 @@ async function parseToolCall({
       return await doParseToolCall({ toolCall: repairedToolCall, tools });
     }
   } catch (error) {
-    const parsedInput = await safeParseJSON3({ text: toolCall.input });
+    const parsedInput = await safeParseJSON({ text: toolCall.input });
     const input = parsedInput.success ? parsedInput.value : toolCall.input;
     const tool2 = tools == null ? void 0 : tools[toolCall.toolName];
     return {
@@ -57799,7 +57799,7 @@ async function parseToolCall({
   }
 }
 async function parseProviderExecutedDynamicToolCall(toolCall) {
-  const parseResult = toolCall.input.trim() === "" ? { success: true, value: {} } : await safeParseJSON3({ text: toolCall.input });
+  const parseResult = toolCall.input.trim() === "" ? { success: true, value: {} } : await safeParseJSON({ text: toolCall.input });
   if (parseResult.success === false) {
     throw new InvalidToolInputError({
       toolName: toolCall.toolName,
@@ -57832,8 +57832,8 @@ async function doParseToolCall({
       availableTools: Object.keys(tools)
     });
   }
-  const schema = asSchema4(tool2.inputSchema);
-  const parseResult = toolCall.input.trim() === "" ? await safeValidateTypes4({ value: {}, schema }) : await safeParseJSON3({ text: toolCall.input, schema });
+  const schema = asSchema(tool2.inputSchema);
+  const parseResult = toolCall.input.trim() === "" ? await safeValidateTypes({ value: {}, schema }) : await safeParseJSON({ text: toolCall.input, schema });
   if (parseResult.success === false) {
     throw new InvalidToolInputError({
       toolName,
@@ -58172,7 +58172,7 @@ async function generateText({
     abortSignal: mergedAbortSignal
   });
   const callSettings = prepareCallSettings(settings);
-  const headersWithUserAgent = withUserAgentSuffix2(
+  const headersWithUserAgent = withUserAgentSuffix(
     headers != null ? headers : {},
     `ai/${ai_dist_VERSION}`
   );
@@ -58575,7 +58575,7 @@ async function generateText({
                 toolCallId: toolCall.toolCallId,
                 toolName: toolCall.toolName,
                 input: toolCall.input,
-                error: getErrorMessage5(toolCall.error),
+                error: dist_getErrorMessage(toolCall.error),
                 dynamic: true
               });
             }
@@ -60392,7 +60392,7 @@ function runToolsTransformation({
                 toolCallId: toolCall.toolCallId,
                 toolName: toolCall.toolName,
                 input: toolCall.input,
-                error: getErrorMessage6(toolCall.error),
+                error: dist_getErrorMessage(toolCall.error),
                 dynamic: true,
                 title: toolCall.title,
                 ...toolCall.toolMetadata != null ? { toolMetadata: toolCall.toolMetadata } : {}
@@ -61060,7 +61060,7 @@ var DefaultStreamTextResult = class {
             // The `reason` is usually of type DOMException, but it can also be of any type,
             // so we use getErrorMessage for serialization because it is already designed to accept values of the unknown type.
             // See: https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/reason
-            ...(abortSignal == null ? void 0 : abortSignal.reason) !== void 0 ? { reason: getErrorMessage7(abortSignal.reason) } : {}
+            ...(abortSignal == null ? void 0 : abortSignal.reason) !== void 0 ? { reason: getErrorMessage(abortSignal.reason) } : {}
           });
           controller.close();
         }
@@ -61076,7 +61076,7 @@ var DefaultStreamTextResult = class {
           }
           controller.enqueue(value);
         } catch (error) {
-          if (isAbortError2(error) && (abortSignal == null ? void 0 : abortSignal.aborted)) {
+          if (isAbortError(error) && (abortSignal == null ? void 0 : abortSignal.aborted)) {
             abort();
           } else {
             controller.error(error);
@@ -61985,7 +61985,7 @@ var DefaultStreamTextResult = class {
     var _a22, _b, _c;
     const transform = (_a22 = this.outputSpecification) == null ? void 0 : _a22.createElementStreamTransform();
     if (transform == null) {
-      throw new UnsupportedFunctionalityError2({
+      throw new UnsupportedFunctionalityError({
         functionality: `element streams in ${(_c = (_b = this.outputSpecification) == null ? void 0 : _b.name) != null ? _c : "text"} mode`
       });
     }
@@ -62370,7 +62370,7 @@ var ToolLoopAgent = class {
   async prepareCall(options) {
     var _a22, _b, _c, _d;
     if (this.settings.callOptionsSchema != null && options.options !== void 0) {
-      const validatedOptions = await validateTypes2({
+      const validatedOptions = await validateTypes({
         value: options.options,
         schema: this.settings.callOptionsSchema,
         context: { field: "options" }
@@ -64154,9 +64154,9 @@ function getOutputStrategy({
 }) {
   switch (output) {
     case "object":
-      return objectOutputStrategy(dist_asSchema(schema));
+      return objectOutputStrategy(asSchema(schema));
     case "array":
-      return arrayOutputStrategy(dist_asSchema(schema));
+      return arrayOutputStrategy(asSchema(schema));
     case "enum":
       return enumOutputStrategy(enumValues);
     case "no-schema":
@@ -69650,7 +69650,7 @@ function dist_jsonSchema(jsonSchema2, {
 function dist_isSchema(value) {
   return typeof value === "object" && value !== null && dist_schemaSymbol in value && value[dist_schemaSymbol] === true && "jsonSchema" in value && "validate" in value;
 }
-function ai_sdk_provider_dist_asSchema(schema) {
+function dist_asSchema(schema) {
   return schema == null ? dist_jsonSchema({ properties: {}, additionalProperties: false }) : dist_isSchema(schema) ? schema : "~standard" in schema ? schema["~standard"].vendor === "zod" ? dist_zodSchema(schema) : dist_standardSchema(schema) : schema();
 }
 function dist_standardSchema(standardSchema2) {
@@ -69720,7 +69720,7 @@ function dist_zodSchema(zodSchema2, options) {
     return dist_zod3Schema(zodSchema2, options);
   }
 }
-async function ai_sdk_provider_dist_validateTypes({
+async function dist_validateTypes({
   value,
   schema,
   context
@@ -69736,7 +69736,7 @@ async function dist_safeValidateTypes({
   schema,
   context
 }) {
-  const actualSchema = ai_sdk_provider_dist_asSchema(schema);
+  const actualSchema = dist_asSchema(schema);
   try {
     if (actualSchema.validate == null) {
       return { success: true, value, rawValue: value };
@@ -69767,7 +69767,7 @@ async function dist_parseJSON({
     if (schema == null) {
       return value;
     }
-    return ai_sdk_provider_dist_validateTypes({ value, schema });
+    return dist_validateTypes({ value, schema });
   } catch (error) {
     if (dist_JSONParseError.isInstance(error) || dist_TypeValidationError.isInstance(error)) {
       throw error;
@@ -72718,7 +72718,7 @@ function findHeaderKey(headers, targetKey) {
   const lowerTarget = targetKey.toLowerCase();
   return Object.keys(headers).find((key) => key.toLowerCase() === lowerTarget);
 }
-function dist_withUserAgentSuffix2(headers, ...userAgentSuffixParts) {
+function withUserAgentSuffix2(headers, ...userAgentSuffixParts) {
   const normalizedHeaders = normalizeHeaders2(headers);
   const cleanedHeaders = dist_removeUndefinedEntries(normalizedHeaders);
   const existingUserAgentKey = findHeaderKey(cleanedHeaders, "user-agent");
@@ -72934,7 +72934,7 @@ function createOpenRouter(options = {}) {
   var _a16, _b16, _c;
   const baseURL = (_b16 = dist_withoutTrailingSlash((_a16 = options.baseURL) != null ? _a16 : options.baseUrl)) != null ? _b16 : "https://openrouter.ai/api/v1";
   const compatibility = (_c = options.compatibility) != null ? _c : "compatible";
-  const getHeaders = () => dist_withUserAgentSuffix2(
+  const getHeaders = () => withUserAgentSuffix2(
     __spreadValues(__spreadValues(__spreadValues(__spreadValues({
       Authorization: `Bearer ${dist_loadApiKey({
         apiKey: options.apiKey,
@@ -73256,6 +73256,237 @@ function formatFileSection(file) {
     return `${header}\n\`\`\`diff\n${file.patch}\n\`\`\``;
 }
 //# sourceMappingURL=diff.js.map
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+;// CONCATENATED MODULE: ./lib/repo-tools.js
+
+
+
+
+const MAX_FILE_BYTES = 120_000;
+const MAX_SEARCH_FILES = 800;
+const MAX_SEARCH_RESULTS = 80;
+const TEXT_EXTENSIONS = new Set([
+    ".c",
+    ".cc",
+    ".cfg",
+    ".config",
+    ".cpp",
+    ".cs",
+    ".css",
+    ".go",
+    ".graphql",
+    ".h",
+    ".hpp",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".md",
+    ".mjs",
+    ".py",
+    ".rb",
+    ".rs",
+    ".sh",
+    ".sql",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".txt",
+    ".yaml",
+    ".yml"
+]);
+function createReviewTools(context) {
+    return {
+        getPrDetails: tool({
+            description: "Return pull request metadata, changed files, and patches.",
+            inputSchema: object({}),
+            execute: async () => context.prDetails
+        }),
+        getPrComments: tool({
+            description: "Return existing pull request issue comments and review comments.",
+            inputSchema: object({}),
+            execute: async () => context.prComments
+        }),
+        getRepoInstructions: tool({
+            description: "Return repository-level agent/review instructions discovered in the checkout.",
+            inputSchema: object({}),
+            execute: async () => ({
+                instructions: context.repoInstructions || "No repository instruction files were found."
+            })
+        }),
+        readFile: tool({
+            description: "Read a UTF-8 text file from the checked-out repository.",
+            inputSchema: object({
+                path: schemas_string().describe("Repository-relative file path.")
+            }),
+            execute: async ({ path }) => readRepoFile(context.root, path)
+        }),
+        readFileAroundLine: tool({
+            description: "Read a window of lines around a specific line in a repository file.",
+            inputSchema: object({
+                path: schemas_string().describe("Repository-relative file path."),
+                line: schemas_number().int().positive(),
+                radius: schemas_number().int().min(1).max(80).default(30)
+            }),
+            execute: async ({ path, line, radius }) => readFileAroundLine(context.root, path, line, radius)
+        }),
+        listFiles: tool({
+            description: "List repository files whose path includes a query string.",
+            inputSchema: object({
+                query: schemas_string().default("").describe("Case-insensitive substring to match against file paths."),
+                limit: schemas_number().int().min(1).max(200).default(80)
+            }),
+            execute: async ({ query, limit }) => listRepoFiles(context.root, query, limit)
+        }),
+        searchRepo: tool({
+            description: "Search text files in the repository for a literal query.",
+            inputSchema: object({
+                query: schemas_string().min(2).describe("Literal case-insensitive text to search for."),
+                limit: schemas_number().int().min(1).max(MAX_SEARCH_RESULTS).default(40)
+            }),
+            execute: async ({ query, limit }) => searchRepo(context.root, query, limit)
+        })
+    };
+}
+function collectRepoInstructions(root) {
+    const instructionPaths = [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".cursor/rules",
+        ".cursor/rules.md",
+        ".github/copilot-instructions.md"
+    ];
+    const sections = [];
+    for (const path of instructionPaths) {
+        const result = readRepoFile(root, path);
+        if ("content" in result) {
+            sections.push(`## ${path}\n${result.content}`);
+        }
+    }
+    return sections.join("\n\n");
+}
+function readRepoFile(root, path) {
+    const resolved = resolveSafePath(root, path);
+    if (!resolved) {
+        return { error: "Path is outside the repository checkout." };
+    }
+    if (!(0,external_node_fs_namespaceObject.existsSync)(resolved)) {
+        return { error: "File does not exist in the repository checkout." };
+    }
+    const stats = (0,external_node_fs_namespaceObject.statSync)(resolved);
+    if (!stats.isFile()) {
+        return { error: "Path is not a file." };
+    }
+    const raw = (0,external_node_fs_namespaceObject.readFileSync)(resolved);
+    const truncated = raw.byteLength > MAX_FILE_BYTES;
+    return {
+        path: normalizePath((0,external_node_path_namespaceObject.relative)(root, resolved)),
+        content: raw.subarray(0, MAX_FILE_BYTES).toString("utf8"),
+        truncated
+    };
+}
+function readFileAroundLine(root, path, line, radius) {
+    const result = readRepoFile(root, path);
+    if (!("content" in result)) {
+        return result;
+    }
+    const lines = result.content.split("\n");
+    const start = Math.max(1, line - radius);
+    const end = Math.min(lines.length, line + radius);
+    const content = lines
+        .slice(start - 1, end)
+        .map((text, index) => `${start + index}: ${text}`)
+        .join("\n");
+    return {
+        path: result.path,
+        start,
+        end,
+        content,
+        truncated: result.truncated
+    };
+}
+function listRepoFiles(root, query, limit) {
+    const normalizedQuery = query.toLowerCase();
+    const files = walkFiles(root)
+        .filter((path) => path.toLowerCase().includes(normalizedQuery))
+        .slice(0, limit);
+    return { files, truncated: files.length >= limit };
+}
+function searchRepo(root, query, limit) {
+    const needle = query.toLowerCase();
+    const results = [];
+    for (const path of walkFiles(root).slice(0, MAX_SEARCH_FILES)) {
+        if (!isLikelyText(path)) {
+            continue;
+        }
+        const file = readRepoFile(root, path);
+        if (!("content" in file)) {
+            continue;
+        }
+        const lines = file.content.split("\n");
+        for (let index = 0; index < lines.length; index += 1) {
+            const text = lines[index] ?? "";
+            if (text.toLowerCase().includes(needle)) {
+                results.push({ path, line: index + 1, text: text.slice(0, 300) });
+                if (results.length >= limit) {
+                    return { results, truncated: true };
+                }
+            }
+        }
+    }
+    return { results, truncated: false };
+}
+function walkFiles(root) {
+    if (!(0,external_node_fs_namespaceObject.existsSync)(root)) {
+        return [];
+    }
+    const ignored = new Set([".git", "node_modules", "dist", "lib", "test-dist", "coverage"]);
+    const files = [];
+    const queue = [root];
+    while (queue.length > 0 && files.length < MAX_SEARCH_FILES) {
+        const dir = queue.shift();
+        if (!dir) {
+            continue;
+        }
+        for (const entry of (0,external_node_fs_namespaceObject.readdirSync)(dir)) {
+            if (ignored.has(entry)) {
+                continue;
+            }
+            const fullPath = (0,external_node_path_namespaceObject.join)(dir, entry);
+            const stats = (0,external_node_fs_namespaceObject.statSync)(fullPath);
+            if (stats.isDirectory()) {
+                queue.push(fullPath);
+            }
+            else if (stats.isFile()) {
+                files.push(normalizePath((0,external_node_path_namespaceObject.relative)(root, fullPath)));
+            }
+        }
+    }
+    return files;
+}
+function resolveSafePath(root, path) {
+    const resolvedRoot = (0,external_node_path_namespaceObject.resolve)(root);
+    const resolvedPath = (0,external_node_path_namespaceObject.resolve)(resolvedRoot, path);
+    if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(`${resolvedRoot}${external_node_path_namespaceObject.sep}`)) {
+        return undefined;
+    }
+    return resolvedPath;
+}
+function normalizePath(path) {
+    return path.split(external_node_path_namespaceObject.sep).join("/");
+}
+function isLikelyText(path) {
+    const dot = path.lastIndexOf(".");
+    if (dot === -1) {
+        return true;
+    }
+    return TEXT_EXTENSIONS.has(path.slice(dot).toLowerCase());
+}
+//# sourceMappingURL=repo-tools.js.map
 ;// CONCATENATED MODULE: ./lib/schema.js
 
 const findingSchema = object({
@@ -73264,6 +73495,15 @@ const findingSchema = object({
     severity: schemas_enum(["blocker", "major", "minor"]),
     title: schemas_string().min(1).max(120),
     body: schemas_string().min(1).max(2000)
+});
+const agentFindingSchema = findingSchema.extend({
+    confidence: schemas_number().min(0).max(1),
+    evidence: schemas_string().min(1).max(1500),
+    category: schemas_enum(["review", "code-quality"])
+});
+const agentReviewSchema = object({
+    summary: schemas_string().min(1).max(3000),
+    findings: array(agentFindingSchema).max(30)
 });
 const reviewSchema = object({
     score: schemas_number().min(0).max(5),
@@ -73277,24 +73517,58 @@ const reviewSchema = object({
 
 
 
+
+const MAX_AGENT_RUNS = 5;
 async function reviewPullRequest(input) {
     const openrouter = createOpenRouter({
         apiKey: input.apiKey
     });
+    const model = openrouter.chat(input.model);
     const diffContext = buildDiffContext(input.files);
-    const prompt = buildReviewPrompt(input, diffContext.prompt, diffContext.truncated);
-    const { object } = await generateObject({
-        model: openrouter.chat(input.model),
-        schema: reviewSchema,
-        system: SYSTEM_PROMPT,
-        prompt,
-        temperature: 0.1
+    const repoInstructions = collectRepoInstructions(input.workspaceRoot);
+    const basePrompt = buildReviewPrompt(input, diffContext.prompt, diffContext.truncated, repoInstructions);
+    const tools = createReviewTools({
+        root: input.workspaceRoot,
+        prDetails: buildPrDetails(input, diffContext.truncated),
+        prComments: input.comments,
+        repoInstructions
     });
-    const { comments, skippedCommentCount } = selectInlineComments(object.findings, diffContext.commentableLines, input.maxComments);
+    const reviewRunCount = clampRunCount(input.reviewRuns);
+    const codeQualityRunCount = clampRunCount(input.codeQualityRuns);
+    const workerRuns = [
+        ...Array.from({ length: reviewRunCount }, (_, index) => runWorkerAgent({
+            category: "review",
+            passNumber: index + 1,
+            model,
+            tools,
+            basePrompt
+        })),
+        ...Array.from({ length: codeQualityRunCount }, (_, index) => runWorkerAgent({
+            category: "code-quality",
+            passNumber: index + 1,
+            model,
+            tools,
+            basePrompt
+        }))
+    ];
+    const workerResults = await Promise.all(workerRuns);
+    const reviewResults = workerResults.filter((result) => result.category === "review");
+    const codeQualityResults = workerResults.filter((result) => result.category === "code-quality");
+    const [reviewConsolidation, codeQualityConsolidation] = await Promise.all([
+        consolidateCategory("review", reviewResults.map((result) => result.output), input, model),
+        consolidateCategory("code-quality", codeQualityResults.map((result) => result.output), input, model)
+    ]);
+    const finalResult = await consolidateFinalReview({
+        reviewConsolidation,
+        codeQualityConsolidation,
+        input,
+        model
+    });
+    const { comments, skippedCommentCount } = selectInlineComments(finalResult.findings, diffContext.commentableLines, input.maxComments);
     return {
         result: {
-            ...object,
-            score: clampScore(object.score)
+            ...finalResult,
+            score: clampScore(finalResult.score)
         },
         comments,
         skippedCommentCount,
@@ -73321,8 +73595,104 @@ function selectInlineComments(findings, commentableLines, maxComments) {
     }
     return { comments, skippedCommentCount };
 }
-function buildReviewPrompt(input, diff, truncated) {
-    return `Review this pull request. Return only structured data matching the requested schema.
+async function runWorkerAgent(args) {
+    const agent = new ToolLoopAgent({
+        model: args.model,
+        tools: args.tools,
+        instructions: buildWorkerInstructions(args.category, args.passNumber),
+        output: output_exports.object({
+            schema: agentReviewSchema,
+            name: `${args.category}-findings`
+        }),
+        temperature: 0.2,
+        stopWhen: stepCountIs(8)
+    });
+    const result = await agent.generate({
+        prompt: `${args.basePrompt}
+
+You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
+    });
+    return { category: args.category, output: result.output };
+}
+async function consolidateCategory(category, results, input, model) {
+    if (results.length === 0) {
+        return {
+            summary: `No ${category} reviewers were run.`,
+            findings: []
+        };
+    }
+    const { object } = await generateObject({
+        model,
+        schema: agentReviewSchema,
+        system: `You consolidate ${category} reviewer outputs for Code Beat.
+
+Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
+Preserve only findings that are useful as pull request review feedback.
+Keep exact file paths and added-line numbers when present.
+Return a concise summary and a ranked findings list.`,
+        prompt: `Pull request: ${input.owner}/${input.repo}#${input.prNumber}
+Title: ${input.title}
+
+Reviewer outputs:
+${JSON.stringify(results, null, 2)}`,
+        temperature: 0
+    });
+    return object;
+}
+async function consolidateFinalReview(args) {
+    const { object } = await generateObject({
+        model: args.model,
+        schema: reviewSchema,
+        system: `You are the final Code Beat review orchestrator.
+
+Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
+Remove overlap across categories.
+Prefer high-confidence, actionable, non-nit findings.
+Keep inline comments focused and direct.
+Score from 0 to 5:
+- 0: severe correctness or structural failure
+- 1: major issues that should block merge
+- 2: significant concerns
+- 3: acceptable with notable improvements
+- 4: good with minor concerns
+- 5: no clear concerns
+Return only structured data matching the schema.`,
+        prompt: `Pull request: ${args.input.owner}/${args.input.repo}#${args.input.prNumber}
+Title: ${args.input.title}
+
+Review consolidation:
+${JSON.stringify(args.reviewConsolidation, null, 2)}
+
+Code-quality consolidation:
+${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
+        temperature: 0
+    });
+    return object;
+}
+function buildWorkerInstructions(category, passNumber) {
+    if (category === "code-quality") {
+        return `${SYSTEM_PROMPT}
+
+You are one of several independent Code Beat code-quality reviewer agents.
+This is pass ${passNumber}. Do not assume another pass will catch important issues.
+Use the available tools to inspect local repository context, PR metadata, PR comments, repository instructions, changed files, nearby code, and existing helpers when useful.
+Return only findings that are strongly grounded and actionable.`;
+    }
+    return `You are one of several independent Code Beat pull request reviewer agents.
+This is pass ${passNumber}. Do not assume another pass will catch important issues.
+
+Review like a serious senior engineer. Focus on:
+- correctness and behavioral regressions
+- missing tests for changed behavior
+- edge cases and error handling
+- security, privacy, or performance risks when visible
+- confusing implementation choices that would make maintenance risky
+
+Use the available tools to inspect local repository context, PR metadata, PR comments, repository instructions, changed files, nearby code, and existing helpers when useful.
+Return only findings that are strongly grounded and actionable.`;
+}
+function buildReviewPrompt(input, diff, truncated, repoInstructions) {
+    return `Review this pull request.
 
 Repository: ${input.owner}/${input.repo}
 Pull request: #${input.prNumber}
@@ -73335,15 +73705,38 @@ Diff truncated: ${truncated ? "yes" : "no"}
 Pull request body:
 ${input.body || "(empty)"}
 
+Existing PR comments and review comments are available through tools.
+
+Repository instructions discovered up front:
+${repoInstructions || "(none found)"}
+
 Inline comment rules:
 - Only create findings on added lines visible in the diff.
 - Use the exact file path and new-line number from the diff.
-- Keep comments specific, actionable, and focused on maintainability/design issues.
+- Keep comments specific, actionable, and focused on issues worth raising.
 - Prefer fewer high-conviction findings over many weak comments.
-- Score 0 means severe structural regression; 5 means no clear maintainability concerns.
 
 Changed files:
 ${diff}`;
+}
+function buildPrDetails(input, truncatedDiff) {
+    return {
+        repository: `${input.owner}/${input.repo}`,
+        prNumber: input.prNumber,
+        title: input.title,
+        body: input.body,
+        author: input.author,
+        baseRef: input.baseRef,
+        headRef: input.headRef,
+        truncatedDiff,
+        files: input.files
+    };
+}
+function clampRunCount(value) {
+    if (!Number.isFinite(value)) {
+        return 2;
+    }
+    return Math.min(MAX_AGENT_RUNS, Math.max(0, Math.floor(value)));
 }
 function clampScore(score) {
     if (Number.isNaN(score)) {
@@ -73365,13 +73758,15 @@ async function run() {
             return;
         }
         const apiKey = getInput("openrouter-api-key", { required: true });
-        const model = getInput("model", { required: true });
+        const model = getInput("model") || "deepseek/deepseek-v4-flash";
         const token = getInput("github-token") || process.env.GITHUB_TOKEN;
         if (!token) {
             setFailed("A GitHub token is required. Pass github-token or set GITHUB_TOKEN.");
             return;
         }
         const maxComments = parseIntegerInput("max-comments", 12);
+        const reviewRuns = parseIntegerInput("review-runs", 2);
+        const codeQualityRuns = parseIntegerInput("code-quality-runs", 2);
         const failOnScoreBelow = parseOptionalNumberInput("fail-on-score-below");
         const octokit = getOctokit(token);
         const { owner, repo } = github_context.repo;
@@ -73382,6 +73777,20 @@ async function run() {
             pull_number: prNumber,
             per_page: 100
         });
+        const [issueComments, reviewComments] = await Promise.all([
+            octokit.paginate(octokit.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: prNumber,
+                per_page: 100
+            }),
+            octokit.paginate(octokit.rest.pulls.listReviewComments, {
+                owner,
+                repo,
+                pull_number: prNumber,
+                per_page: 100
+            })
+        ]);
         const review = await reviewPullRequest({
             apiKey,
             model,
@@ -73394,7 +73803,24 @@ async function run() {
             baseRef: pullRequest.base.ref,
             headRef: pullRequest.head.ref,
             files: files.map(toPullRequestFile),
-            maxComments
+            comments: {
+                issueComments: issueComments.map((comment) => ({
+                    author: comment.user?.login ?? "unknown",
+                    body: comment.body ?? "",
+                    createdAt: comment.created_at
+                })),
+                reviewComments: reviewComments.map((comment) => ({
+                    author: comment.user?.login ?? "unknown",
+                    body: comment.body ?? "",
+                    path: comment.path,
+                    line: comment.line ?? undefined,
+                    createdAt: comment.created_at
+                }))
+            },
+            maxComments,
+            reviewRuns,
+            codeQualityRuns,
+            workspaceRoot: process.env.GITHUB_WORKSPACE ?? process.cwd()
         });
         const body = formatReviewBody({
             result: review.result,

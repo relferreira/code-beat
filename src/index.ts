@@ -13,7 +13,7 @@ async function run(): Promise<void> {
     }
 
     const apiKey = getInput("openrouter-api-key", { required: true });
-    const model = getInput("model", { required: true });
+    const model = getInput("model") || "deepseek/deepseek-v4-flash";
     const token = getInput("github-token") || process.env.GITHUB_TOKEN;
     if (!token) {
       setFailed("A GitHub token is required. Pass github-token or set GITHUB_TOKEN.");
@@ -21,6 +21,8 @@ async function run(): Promise<void> {
     }
 
     const maxComments = parseIntegerInput("max-comments", 12);
+    const reviewRuns = parseIntegerInput("review-runs", 2);
+    const codeQualityRuns = parseIntegerInput("code-quality-runs", 2);
     const failOnScoreBelow = parseOptionalNumberInput("fail-on-score-below");
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
@@ -32,6 +34,20 @@ async function run(): Promise<void> {
       pull_number: prNumber,
       per_page: 100
     });
+    const [issueComments, reviewComments] = await Promise.all([
+      octokit.paginate(octokit.rest.issues.listComments, {
+        owner,
+        repo,
+        issue_number: prNumber,
+        per_page: 100
+      }),
+      octokit.paginate(octokit.rest.pulls.listReviewComments, {
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: 100
+      })
+    ]);
 
     const review = await reviewPullRequest({
       apiKey,
@@ -45,7 +61,24 @@ async function run(): Promise<void> {
       baseRef: pullRequest.base.ref,
       headRef: pullRequest.head.ref,
       files: files.map(toPullRequestFile),
-      maxComments
+      comments: {
+        issueComments: issueComments.map((comment) => ({
+          author: comment.user?.login ?? "unknown",
+          body: comment.body ?? "",
+          createdAt: comment.created_at
+        })),
+        reviewComments: reviewComments.map((comment) => ({
+          author: comment.user?.login ?? "unknown",
+          body: comment.body ?? "",
+          path: comment.path,
+          line: comment.line ?? undefined,
+          createdAt: comment.created_at
+        }))
+      },
+      maxComments,
+      reviewRuns,
+      codeQualityRuns,
+      workspaceRoot: process.env.GITHUB_WORKSPACE ?? process.cwd()
     });
 
     const body = formatReviewBody({

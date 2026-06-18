@@ -7,7 +7,16 @@ inputs:
     required: true
   model:
     description: OpenRouter model name, for example anthropic/claude-sonnet-4 or openai/gpt-4.1.
-    required: true
+    required: false
+    default: deepseek/deepseek-v4-flash
+  review-runs:
+    description: Number of independent general PR review agents to run.
+    required: false
+    default: "2"
+  code-quality-runs:
+    description: Number of independent thermo-nuclear code-quality review agents to run.
+    required: false
+    default: "2"
   github-token:
     description: GitHub token used to read pull request diffs and create review comments.
     required: false
