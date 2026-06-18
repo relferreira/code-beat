@@ -73664,7 +73664,7 @@ Code-quality consolidation:
 ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
         temperature: 0
     });
-    return reviewSchema.parse(parseJsonObject(text));
+    return normalizeReviewResult(parseJsonObject(text));
 }
 function buildWorkerInstructions(category, passNumber) {
     if (category === "code-quality") {
@@ -73737,7 +73737,71 @@ function parseJsonObject(text) {
     }
 }
 function parseAgentReviewResult(text) {
-    return agentReviewSchema.parse(parseJsonObject(text));
+    return normalizeAgentReviewResult(parseJsonObject(text));
+}
+function normalizeAgentReviewResult(value) {
+    const input = asRecord(value);
+    const findings = Array.isArray(input.findings) ? input.findings : [];
+    return agentReviewSchema.parse({
+        summary: truncate(String(input.summary ?? "No summary provided."), 3000),
+        findings: findings.map((finding) => normalizeAgentFinding(finding)).filter((finding) => finding !== undefined)
+    });
+}
+function normalizeReviewResult(value) {
+    const input = asRecord(value);
+    const findings = Array.isArray(input.findings) ? input.findings : [];
+    return reviewSchema.parse({
+        score: clampScore(Number(input.score ?? 0)),
+        summary: truncate(String(input.summary ?? "No summary provided."), 4000),
+        findings: findings.map((finding) => normalizeFinding(finding)).filter((finding) => finding !== undefined)
+    });
+}
+function normalizeAgentFinding(value) {
+    const finding = normalizeFinding(value);
+    if (!finding) {
+        return undefined;
+    }
+    const input = asRecord(value);
+    const rawConfidence = Number(input.confidence ?? 0.7);
+    const confidence = rawConfidence > 1 && rawConfidence <= 100 ? rawConfidence / 100 : rawConfidence;
+    const category = input.category === "review" || input.category === "code-quality" ? input.category : "review";
+    return {
+        ...finding,
+        confidence: Math.min(1, Math.max(0, Number.isFinite(confidence) ? confidence : 0.7)),
+        evidence: truncate(String(input.evidence ?? finding.body), 1500),
+        category
+    };
+}
+function normalizeFinding(value) {
+    const input = asRecord(value);
+    const path = String(input.path ?? "").trim();
+    const line = Math.floor(Number(input.line));
+    if (!path || !Number.isFinite(line) || line < 1) {
+        return undefined;
+    }
+    return {
+        path,
+        line,
+        severity: normalizeSeverity(input.severity),
+        title: truncate(String(input.title ?? "Review finding"), 120),
+        body: truncate(String(input.body ?? ""), 2000)
+    };
+}
+function normalizeSeverity(value) {
+    if (value === "blocker" || value === "major" || value === "minor") {
+        return value;
+    }
+    return "major";
+}
+function asRecord(value) {
+    return value !== null && typeof value === "object" ? value : {};
+}
+function truncate(value, maxLength) {
+    const trimmed = value.trim();
+    if (trimmed.length <= maxLength) {
+        return trimmed || "No details provided.";
+    }
+    return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 function buildPrDetails(input, truncatedDiff) {
     return {
