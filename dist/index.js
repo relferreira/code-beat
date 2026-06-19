@@ -74179,6 +74179,7 @@ function clampScore(score) {
 
 async function run() {
     let cleanupProcessingReaction;
+    let cleanupSuccessReaction;
     try {
         const pullRequest = github_context.payload.pull_request;
         if (!pullRequest) {
@@ -74200,6 +74201,7 @@ async function run() {
         const { owner, repo } = github_context.repo;
         const prNumber = pullRequest.number;
         const authenticatedLogin = await getAuthenticatedLogin(octokit);
+        cleanupSuccessReaction = () => removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1", authenticatedLogin);
         console.log(`Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
         const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
         cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
@@ -74301,7 +74303,7 @@ async function run() {
             await addIssueReaction(octokit, owner, repo, prNumber, "+1");
         }
         else {
-            await removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1", authenticatedLogin);
+            await cleanupSuccessReaction();
         }
         console.log(`Code Beat complete: score=${review.result.score}, inline-comments=${review.comments.length}`);
         setOutput("score", String(review.result.score));
@@ -74313,6 +74315,7 @@ async function run() {
     }
     catch (error) {
         await cleanupProcessingReaction?.();
+        await cleanupSuccessReaction?.();
         setFailed(error instanceof Error ? error.message : String(error));
     }
 }

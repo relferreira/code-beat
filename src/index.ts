@@ -9,6 +9,7 @@ type Octokit = ReturnType<typeof github.getOctokit>;
 
 async function run(): Promise<void> {
   let cleanupProcessingReaction: (() => Promise<void>) | undefined;
+  let cleanupSuccessReaction: (() => Promise<void>) | undefined;
 
   try {
     const pullRequest = github.context.payload.pull_request;
@@ -33,6 +34,7 @@ async function run(): Promise<void> {
     const { owner, repo } = github.context.repo;
     const prNumber = pullRequest.number;
     const authenticatedLogin = await getAuthenticatedLogin(octokit);
+    cleanupSuccessReaction = () => removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1", authenticatedLogin);
     console.log(
       `Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`
     );
@@ -143,7 +145,7 @@ async function run(): Promise<void> {
     if (review.result.score >= 5) {
       await addIssueReaction(octokit, owner, repo, prNumber, "+1");
     } else {
-      await removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1", authenticatedLogin);
+      await cleanupSuccessReaction();
     }
     console.log(`Code Beat complete: score=${review.result.score}, inline-comments=${review.comments.length}`);
 
@@ -156,6 +158,7 @@ async function run(): Promise<void> {
     }
   } catch (error) {
     await cleanupProcessingReaction?.();
+    await cleanupSuccessReaction?.();
     setFailed(error instanceof Error ? error.message : String(error));
   }
 }
