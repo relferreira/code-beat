@@ -7,9 +7,6 @@ import type { PullRequestReviewThreadContext } from "./review.js";
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
-const MAX_REVIEW_THREADS = 40;
-const MAX_THREAD_COMMENT_BODY = 800;
-
 async function run(): Promise<void> {
   let cleanupProcessingReaction: (() => Promise<void>) | undefined;
 
@@ -35,10 +32,15 @@ async function run(): Promise<void> {
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
     const prNumber = pullRequest.number;
+    console.log(
+      `Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`
+    );
 
     const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
     cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
 
+    const fetchStartedAt = Date.now();
+    console.log("Code Beat GitHub context fetch start");
     const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
       owner,
       repo,
@@ -60,7 +62,14 @@ async function run(): Promise<void> {
       }),
       fetchReviewThreads(octokit, owner, repo, prNumber)
     ]);
+    console.log(
+      `Code Beat GitHub context fetch complete in ${Date.now() - fetchStartedAt}ms: ` +
+        `${files.length} file(s), ${issueComments.length} issue comment(s), ${reviewComments.length} review comment(s), ` +
+        `${reviewThreads.length} review thread(s)`
+    );
 
+    const reviewStartedAt = Date.now();
+    console.log("Code Beat AI review start");
     const review = await reviewPullRequest({
       apiKey,
       model,
@@ -93,6 +102,7 @@ async function run(): Promise<void> {
       codeQualityRuns,
       workspaceRoot: process.env.GITHUB_WORKSPACE ?? process.cwd()
     });
+    console.log(`Code Beat AI review complete in ${Date.now() - reviewStartedAt}ms`);
 
     const body = formatReviewBody({
       result: review.result,
@@ -102,6 +112,7 @@ async function run(): Promise<void> {
     });
 
     if (review.comments.length > 0) {
+      console.log(`Code Beat posting PR review with ${review.comments.length} inline comment(s)`);
       await octokit.rest.pulls.createReview({
         owner,
         repo,
@@ -116,6 +127,7 @@ async function run(): Promise<void> {
         }))
       });
     } else {
+      console.log("Code Beat posting summary issue comment with no inline comments");
       await octokit.rest.issues.createComment({
         owner,
         repo,
@@ -130,6 +142,7 @@ async function run(): Promise<void> {
     if (review.result.score >= 5) {
       await addIssueReaction(octokit, owner, repo, prNumber, "+1");
     }
+    console.log(`Code Beat complete: score=${review.result.score}, inline-comments=${review.comments.length}`);
 
     setOutput("score", String(review.result.score));
     setOutput("summary", review.result.summary);
@@ -251,7 +264,7 @@ async function fetchReviewThreads(
             isOutdated
             path
             line
-            comments(first: 10) {
+            comments(first: 20) {
               nodes {
                 author {
                   login
@@ -294,30 +307,22 @@ async function fetchReviewThreads(
           continue;
         }
 
-        const comments = thread.comments.nodes
-          .filter((comment) => comment !== null)
-          .map((comment) => ({
-            author: comment.author?.login ?? "unknown",
-            body: truncateText(comment.body, MAX_THREAD_COMMENT_BODY),
-            path: comment.path ?? undefined,
-            line: comment.line ?? undefined,
-            createdAt: comment.createdAt,
-            url: comment.url ?? undefined
-          }));
-        if (!thread.isResolved && !comments.some((comment) => isHumanReviewReply(comment.author))) {
-          continue;
-        }
-
         threads.push({
           isResolved: thread.isResolved,
           isOutdated: thread.isOutdated,
           path: thread.path ?? undefined,
           line: thread.line ?? undefined,
-          comments
+          comments: thread.comments.nodes
+            .filter((comment) => comment !== null)
+            .map((comment) => ({
+              author: comment.author?.login ?? "unknown",
+              body: comment.body,
+              path: comment.path ?? undefined,
+              line: comment.line ?? undefined,
+              createdAt: comment.createdAt,
+              url: comment.url ?? undefined
+            }))
         });
-        if (threads.length >= MAX_REVIEW_THREADS) {
-          return threads;
-        }
       }
 
       after = reviewThreads.pageInfo.endCursor ?? undefined;
@@ -331,10 +336,6 @@ async function fetchReviewThreads(
     console.warn(`::warning::Could not fetch pull request review threads: ${formatError(error)}`);
     return [];
   }
-}
-
-function isHumanReviewReply(author: string): boolean {
-  return author !== "github-actions" && !author.endsWith("[bot]");
 }
 
 function parseIntegerInput(name: string, fallback: number): number {
@@ -367,15 +368,6 @@ function parseOptionalNumberInput(name: string): number | undefined {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function truncateText(value: string, maxLength: number): string {
-  const trimmed = value.trim();
-  if (trimmed.length <= maxLength) {
-    return trimmed;
-  }
-
-  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 void run();

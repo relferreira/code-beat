@@ -44,7 +44,16 @@ export interface RepoToolContext {
   root: string;
   prDetails: unknown;
   prComments: unknown;
+  prReviewThreads: ReviewThreadContext[];
   repoInstructions: string;
+}
+
+interface ReviewThreadContext {
+  isResolved: boolean;
+  isOutdated: boolean;
+  path?: string;
+  line?: number;
+  comments: Array<{ author: string; body: string; path?: string; line?: number; createdAt?: string; url?: string }>;
 }
 
 export function createReviewTools(context: RepoToolContext) {
@@ -56,9 +65,32 @@ export function createReviewTools(context: RepoToolContext) {
     }),
     getPrComments: tool({
       description:
-        "Return existing pull request issue comments, review comments, and review thread state including resolved threads and replies.",
+        "Return existing pull request issue comments and review comments plus review thread counts. Use getReviewThreads for resolved thread state and replies.",
       inputSchema: z.object({}),
-      execute: async () => context.prComments
+      execute: async () => {
+        console.log("Code Beat tool call: getPrComments");
+        return context.prComments;
+      }
+    }),
+    getReviewThreads: tool({
+      description:
+        "Return pull request review threads with resolved state and replies. Use this before repeating a prior Code Beat finding.",
+      inputSchema: z.object({
+        path: z.string().optional().describe("Optional repository-relative file path to filter threads."),
+        query: z.string().optional().describe("Optional case-insensitive text to search in thread comments."),
+        includeResolved: z.boolean().default(true),
+        includeUnresolved: z.boolean().default(true),
+        onlyWithHumanReplies: z.boolean().default(false),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(100).default(20)
+      }),
+      execute: async (args) => {
+        const result = filterReviewThreads(context.prReviewThreads, args);
+        console.log(
+          `Code Beat tool call: getReviewThreads returned ${result.threads.length}/${result.totalMatching} thread(s)`
+        );
+        return result;
+      }
     }),
     getRepoInstructions: tool({
       description: "Return repository-level agent/review instructions discovered in the checkout.",
@@ -72,7 +104,10 @@ export function createReviewTools(context: RepoToolContext) {
       inputSchema: z.object({
         path: z.string().describe("Repository-relative file path.")
       }),
-      execute: async ({ path }) => readRepoFile(context.root, path)
+      execute: async ({ path }) => {
+        console.log(`Code Beat tool call: readFile ${path}`);
+        return readRepoFile(context.root, path);
+      }
     }),
     readFileAroundLine: tool({
       description: "Read a window of lines around a specific line in a repository file.",
@@ -81,7 +116,10 @@ export function createReviewTools(context: RepoToolContext) {
         line: z.number().int().positive(),
         radius: z.number().int().min(1).max(80).default(30)
       }),
-      execute: async ({ path, line, radius }) => readFileAroundLine(context.root, path, line, radius)
+      execute: async ({ path, line, radius }) => {
+        console.log(`Code Beat tool call: readFileAroundLine ${path}:${line} radius=${radius}`);
+        return readFileAroundLine(context.root, path, line, radius);
+      }
     }),
     listFiles: tool({
       description: "List repository files whose path includes a query string.",
@@ -89,7 +127,11 @@ export function createReviewTools(context: RepoToolContext) {
         query: z.string().default("").describe("Case-insensitive substring to match against file paths."),
         limit: z.number().int().min(1).max(200).default(80)
       }),
-      execute: async ({ query, limit }) => listRepoFiles(context.root, query, limit)
+      execute: async ({ query, limit }) => {
+        const result = listRepoFiles(context.root, query, limit);
+        console.log(`Code Beat tool call: listFiles query="${query}" returned ${result.files.length} file(s)`);
+        return result;
+      }
     }),
     searchRepo: tool({
       description: "Search text files in the repository for a literal query.",
@@ -97,9 +139,64 @@ export function createReviewTools(context: RepoToolContext) {
         query: z.string().min(2).describe("Literal case-insensitive text to search for."),
         limit: z.number().int().min(1).max(MAX_SEARCH_RESULTS).default(40)
       }),
-      execute: async ({ query, limit }) => searchRepo(context.root, query, limit)
+      execute: async ({ query, limit }) => {
+        const result = searchRepo(context.root, query, limit);
+        console.log(`Code Beat tool call: searchRepo query="${query}" returned ${result.results.length} result(s)`);
+        return result;
+      }
     })
   };
+}
+
+function filterReviewThreads(
+  threads: ReviewThreadContext[],
+  args: {
+    path?: string;
+    query?: string;
+    includeResolved: boolean;
+    includeUnresolved: boolean;
+    onlyWithHumanReplies: boolean;
+    offset: number;
+    limit: number;
+  }
+) {
+  const normalizedQuery = args.query?.trim().toLowerCase();
+  const filtered = threads.filter((thread) => {
+    if (args.path && thread.path !== args.path) {
+      return false;
+    }
+
+    if (thread.isResolved && !args.includeResolved) {
+      return false;
+    }
+
+    if (!thread.isResolved && !args.includeUnresolved) {
+      return false;
+    }
+
+    if (args.onlyWithHumanReplies && !thread.comments.some((comment) => isHumanReviewReply(comment.author))) {
+      return false;
+    }
+
+    if (normalizedQuery && !thread.comments.some((comment) => comment.body.toLowerCase().includes(normalizedQuery))) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return {
+    totalThreads: threads.length,
+    totalMatching: filtered.length,
+    offset: args.offset,
+    limit: args.limit,
+    truncated: args.offset + args.limit < filtered.length,
+    threads: filtered.slice(args.offset, args.offset + args.limit)
+  };
+}
+
+function isHumanReviewReply(author: string): boolean {
+  return author !== "github-actions" && !author.endsWith("[bot]");
 }
 
 export function collectRepoInstructions(root: string): string {

@@ -70,10 +70,21 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   const diffContext = buildDiffContext(input.files);
   const repoInstructions = collectRepoInstructions(input.workspaceRoot);
   const basePrompt = buildReviewPrompt(input, diffContext.prompt, diffContext.truncated, repoInstructions);
+  console.log(
+    `Code Beat context: ${input.files.length} file(s), ${input.comments.issueComments.length} issue comment(s), ` +
+      `${input.comments.reviewComments.length} review comment(s), ${input.comments.reviewThreads.length} review thread(s), ` +
+      `diff truncated=${diffContext.truncated}`
+  );
   const tools = createReviewTools({
     root: input.workspaceRoot,
     prDetails: buildPrDetails(input, diffContext.truncated),
-    prComments: input.comments,
+    prComments: {
+      issueComments: input.comments.issueComments,
+      reviewComments: input.comments.reviewComments,
+      reviewThreadCount: input.comments.reviewThreads.length,
+      note: "Use getReviewThreads to inspect resolved review threads and human replies."
+    },
+    prReviewThreads: input.comments.reviewThreads,
     repoInstructions
   });
 
@@ -101,6 +112,9 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   ];
 
   const workerResults = await Promise.all(workerRuns);
+  console.log(
+    `Code Beat workers complete: ${workerResults.filter((result) => !result.skipped).length}/${workerResults.length} valid output(s)`
+  );
   const reviewResults = workerResults.filter((result) => result.category === "review" && !result.skipped);
   const codeQualityResults = workerResults.filter((result) => result.category === "code-quality" && !result.skipped);
 
@@ -116,11 +130,18 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
     model
   });
   const resultWithThreadFeedback = applyReviewThreadFeedback(finalResult, input.comments.reviewThreads);
+  const suppressedFindingCount = finalResult.findings.length - resultWithThreadFeedback.findings.length;
+  if (suppressedFindingCount > 0) {
+    console.log(`Code Beat thread feedback suppressed ${suppressedFindingCount} repeated finding(s)`);
+  }
 
   const { comments, skippedCommentCount } = selectInlineComments(
     resultWithThreadFeedback.findings,
     diffContext.commentableLines,
     input.maxComments
+  );
+  console.log(
+    `Code Beat selected ${comments.length} inline comment(s), skipped ${skippedCommentCount} finding(s), score=${resultWithThreadFeedback.score}`
   );
 
   return {
@@ -171,6 +192,8 @@ async function runWorkerAgent(args: {
   tools: ReturnType<typeof createReviewTools>;
   basePrompt: string;
 }): Promise<WorkerRunResult> {
+  const startedAt = Date.now();
+  console.log(`Code Beat worker start: ${args.category} pass ${args.passNumber}`);
   try {
     const agent = new ToolLoopAgent({
       model: args.model,
@@ -186,6 +209,9 @@ async function runWorkerAgent(args: {
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
     });
 
+    console.log(
+      `Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms`
+    );
     return {
       category: args.category,
       output: parseAgentReviewResultText(result.text, args.category),
@@ -193,6 +219,11 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     };
   } catch (error) {
     const message = formatError(error);
+    console.warn(
+      `::warning::Code Beat worker skipped: ${args.category} pass ${args.passNumber} failed after ${
+        Date.now() - startedAt
+      }ms: ${message}`
+    );
     return {
       category: args.category,
       output: {
@@ -210,7 +241,10 @@ async function consolidateCategory(
   input: ReviewInput,
   model: ReviewModel
 ): Promise<AgentReviewResult> {
+  const startedAt = Date.now();
+  console.log(`Code Beat consolidation start: ${category} with ${results.length} result(s)`);
   if (results.length === 0) {
+    console.log(`Code Beat consolidation skipped: ${category} had no valid outputs`);
     return {
       summary: `No valid ${category} reviewer outputs were available.`,
       findings: []
@@ -236,8 +270,15 @@ ${JSON.stringify(results, null, 2)}`,
       temperature: 0
     });
 
-    return parseAgentReviewResultText(text, category);
+    const output = parseAgentReviewResultText(text, category);
+    console.log(
+      `Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${output.findings.length} finding(s)`
+    );
+    return output;
   } catch (error) {
+    console.warn(
+      `::warning::Code Beat consolidation fallback: ${category} failed after ${Date.now() - startedAt}ms: ${formatError(error)}`
+    );
     return mergeAgentResults(
       category,
       results,
@@ -253,6 +294,8 @@ async function consolidateFinalReview(args: {
   model: ReviewModel;
 }): Promise<ReviewResult> {
   const fallbackFindings = [...args.reviewConsolidation.findings, ...args.codeQualityConsolidation.findings];
+  const startedAt = Date.now();
+  console.log(`Code Beat final consolidation start with ${fallbackFindings.length} candidate finding(s)`);
 
   try {
     const { text } = await generateText({
@@ -283,8 +326,13 @@ ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
       temperature: 0
     });
 
-    return parseReviewResultText(text, fallbackFindings);
+    const output = parseReviewResultText(text, fallbackFindings);
+    console.log(
+      `Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${output.score} and ${output.findings.length} finding(s)`
+    );
+    return output;
   } catch (error) {
+    console.warn(`::warning::Code Beat final consolidation fallback after ${Date.now() - startedAt}ms: ${formatError(error)}`);
     return buildFallbackReview(fallbackFindings, `Final consolidation was skipped after an error: ${formatError(error)}`);
   }
 }

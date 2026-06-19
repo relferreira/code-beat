@@ -73356,9 +73356,29 @@ function createReviewTools(context) {
             execute: async () => context.prDetails
         }),
         getPrComments: tool({
-            description: "Return existing pull request issue comments, review comments, and review thread state including resolved threads and replies.",
+            description: "Return existing pull request issue comments and review comments plus review thread counts. Use getReviewThreads for resolved thread state and replies.",
             inputSchema: object({}),
-            execute: async () => context.prComments
+            execute: async () => {
+                console.log("Code Beat tool call: getPrComments");
+                return context.prComments;
+            }
+        }),
+        getReviewThreads: tool({
+            description: "Return pull request review threads with resolved state and replies. Use this before repeating a prior Code Beat finding.",
+            inputSchema: object({
+                path: schemas_string().optional().describe("Optional repository-relative file path to filter threads."),
+                query: schemas_string().optional().describe("Optional case-insensitive text to search in thread comments."),
+                includeResolved: schemas_boolean().default(true),
+                includeUnresolved: schemas_boolean().default(true),
+                onlyWithHumanReplies: schemas_boolean().default(false),
+                offset: schemas_number().int().min(0).default(0),
+                limit: schemas_number().int().min(1).max(100).default(20)
+            }),
+            execute: async (args) => {
+                const result = filterReviewThreads(context.prReviewThreads, args);
+                console.log(`Code Beat tool call: getReviewThreads returned ${result.threads.length}/${result.totalMatching} thread(s)`);
+                return result;
+            }
         }),
         getRepoInstructions: tool({
             description: "Return repository-level agent/review instructions discovered in the checkout.",
@@ -73372,7 +73392,10 @@ function createReviewTools(context) {
             inputSchema: object({
                 path: schemas_string().describe("Repository-relative file path.")
             }),
-            execute: async ({ path }) => readRepoFile(context.root, path)
+            execute: async ({ path }) => {
+                console.log(`Code Beat tool call: readFile ${path}`);
+                return readRepoFile(context.root, path);
+            }
         }),
         readFileAroundLine: tool({
             description: "Read a window of lines around a specific line in a repository file.",
@@ -73381,7 +73404,10 @@ function createReviewTools(context) {
                 line: schemas_number().int().positive(),
                 radius: schemas_number().int().min(1).max(80).default(30)
             }),
-            execute: async ({ path, line, radius }) => readFileAroundLine(context.root, path, line, radius)
+            execute: async ({ path, line, radius }) => {
+                console.log(`Code Beat tool call: readFileAroundLine ${path}:${line} radius=${radius}`);
+                return readFileAroundLine(context.root, path, line, radius);
+            }
         }),
         listFiles: tool({
             description: "List repository files whose path includes a query string.",
@@ -73389,7 +73415,11 @@ function createReviewTools(context) {
                 query: schemas_string().default("").describe("Case-insensitive substring to match against file paths."),
                 limit: schemas_number().int().min(1).max(200).default(80)
             }),
-            execute: async ({ query, limit }) => listRepoFiles(context.root, query, limit)
+            execute: async ({ query, limit }) => {
+                const result = listRepoFiles(context.root, query, limit);
+                console.log(`Code Beat tool call: listFiles query="${query}" returned ${result.files.length} file(s)`);
+                return result;
+            }
         }),
         searchRepo: tool({
             description: "Search text files in the repository for a literal query.",
@@ -73397,9 +73427,45 @@ function createReviewTools(context) {
                 query: schemas_string().min(2).describe("Literal case-insensitive text to search for."),
                 limit: schemas_number().int().min(1).max(MAX_SEARCH_RESULTS).default(40)
             }),
-            execute: async ({ query, limit }) => searchRepo(context.root, query, limit)
+            execute: async ({ query, limit }) => {
+                const result = searchRepo(context.root, query, limit);
+                console.log(`Code Beat tool call: searchRepo query="${query}" returned ${result.results.length} result(s)`);
+                return result;
+            }
         })
     };
+}
+function filterReviewThreads(threads, args) {
+    const normalizedQuery = args.query?.trim().toLowerCase();
+    const filtered = threads.filter((thread) => {
+        if (args.path && thread.path !== args.path) {
+            return false;
+        }
+        if (thread.isResolved && !args.includeResolved) {
+            return false;
+        }
+        if (!thread.isResolved && !args.includeUnresolved) {
+            return false;
+        }
+        if (args.onlyWithHumanReplies && !thread.comments.some((comment) => isHumanReviewReply(comment.author))) {
+            return false;
+        }
+        if (normalizedQuery && !thread.comments.some((comment) => comment.body.toLowerCase().includes(normalizedQuery))) {
+            return false;
+        }
+        return true;
+    });
+    return {
+        totalThreads: threads.length,
+        totalMatching: filtered.length,
+        offset: args.offset,
+        limit: args.limit,
+        truncated: args.offset + args.limit < filtered.length,
+        threads: filtered.slice(args.offset, args.offset + args.limit)
+    };
+}
+function isHumanReviewReply(author) {
+    return author !== "github-actions" && !author.endsWith("[bot]");
 }
 function collectRepoInstructions(root) {
     const instructionPaths = [
@@ -73576,10 +73642,19 @@ async function reviewPullRequest(input) {
     const diffContext = buildDiffContext(input.files);
     const repoInstructions = collectRepoInstructions(input.workspaceRoot);
     const basePrompt = buildReviewPrompt(input, diffContext.prompt, diffContext.truncated, repoInstructions);
+    console.log(`Code Beat context: ${input.files.length} file(s), ${input.comments.issueComments.length} issue comment(s), ` +
+        `${input.comments.reviewComments.length} review comment(s), ${input.comments.reviewThreads.length} review thread(s), ` +
+        `diff truncated=${diffContext.truncated}`);
     const tools = createReviewTools({
         root: input.workspaceRoot,
         prDetails: buildPrDetails(input, diffContext.truncated),
-        prComments: input.comments,
+        prComments: {
+            issueComments: input.comments.issueComments,
+            reviewComments: input.comments.reviewComments,
+            reviewThreadCount: input.comments.reviewThreads.length,
+            note: "Use getReviewThreads to inspect resolved review threads and human replies."
+        },
+        prReviewThreads: input.comments.reviewThreads,
         repoInstructions
     });
     const reviewRunCount = clampRunCount(input.reviewRuns);
@@ -73601,6 +73676,7 @@ async function reviewPullRequest(input) {
         }))
     ];
     const workerResults = await Promise.all(workerRuns);
+    console.log(`Code Beat workers complete: ${workerResults.filter((result) => !result.skipped).length}/${workerResults.length} valid output(s)`);
     const reviewResults = workerResults.filter((result) => result.category === "review" && !result.skipped);
     const codeQualityResults = workerResults.filter((result) => result.category === "code-quality" && !result.skipped);
     const [reviewConsolidation, codeQualityConsolidation] = await Promise.all([
@@ -73614,7 +73690,12 @@ async function reviewPullRequest(input) {
         model
     });
     const resultWithThreadFeedback = applyReviewThreadFeedback(finalResult, input.comments.reviewThreads);
+    const suppressedFindingCount = finalResult.findings.length - resultWithThreadFeedback.findings.length;
+    if (suppressedFindingCount > 0) {
+        console.log(`Code Beat thread feedback suppressed ${suppressedFindingCount} repeated finding(s)`);
+    }
     const { comments, skippedCommentCount } = selectInlineComments(resultWithThreadFeedback.findings, diffContext.commentableLines, input.maxComments);
+    console.log(`Code Beat selected ${comments.length} inline comment(s), skipped ${skippedCommentCount} finding(s), score=${resultWithThreadFeedback.score}`);
     return {
         result: {
             ...resultWithThreadFeedback,
@@ -73646,6 +73727,8 @@ function selectInlineComments(findings, commentableLines, maxComments) {
     return { comments, skippedCommentCount };
 }
 async function runWorkerAgent(args) {
+    const startedAt = Date.now();
+    console.log(`Code Beat worker start: ${args.category} pass ${args.passNumber}`);
     try {
         const agent = new ToolLoopAgent({
             model: args.model,
@@ -73659,6 +73742,7 @@ async function runWorkerAgent(args) {
 
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
         });
+        console.log(`Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms`);
         return {
             category: args.category,
             output: parseAgentReviewResultText(result.text, args.category),
@@ -73667,6 +73751,7 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     }
     catch (error) {
         const message = review_formatError(error);
+        console.warn(`::warning::Code Beat worker skipped: ${args.category} pass ${args.passNumber} failed after ${Date.now() - startedAt}ms: ${message}`);
         return {
             category: args.category,
             output: {
@@ -73678,7 +73763,10 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     }
 }
 async function consolidateCategory(category, results, input, model) {
+    const startedAt = Date.now();
+    console.log(`Code Beat consolidation start: ${category} with ${results.length} result(s)`);
     if (results.length === 0) {
+        console.log(`Code Beat consolidation skipped: ${category} had no valid outputs`);
         return {
             summary: `No valid ${category} reviewer outputs were available.`,
             findings: []
@@ -73702,14 +73790,19 @@ Reviewer outputs:
 ${JSON.stringify(results, null, 2)}`,
             temperature: 0
         });
-        return parseAgentReviewResultText(text, category);
+        const output = parseAgentReviewResultText(text, category);
+        console.log(`Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${output.findings.length} finding(s)`);
+        return output;
     }
     catch (error) {
+        console.warn(`::warning::Code Beat consolidation fallback: ${category} failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
         return mergeAgentResults(category, results, `${category} consolidation was skipped after an error: ${review_formatError(error)}`);
     }
 }
 async function consolidateFinalReview(args) {
     const fallbackFindings = [...args.reviewConsolidation.findings, ...args.codeQualityConsolidation.findings];
+    const startedAt = Date.now();
+    console.log(`Code Beat final consolidation start with ${fallbackFindings.length} candidate finding(s)`);
     try {
         const { text } = await generateText({
             model: args.model,
@@ -73738,9 +73831,12 @@ Code-quality consolidation:
 ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
             temperature: 0
         });
-        return parseReviewResultText(text, fallbackFindings);
+        const output = parseReviewResultText(text, fallbackFindings);
+        console.log(`Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${output.score} and ${output.findings.length} finding(s)`);
+        return output;
     }
     catch (error) {
+        console.warn(`::warning::Code Beat final consolidation fallback after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
         return buildFallbackReview(fallbackFindings, `Final consolidation was skipped after an error: ${review_formatError(error)}`);
     }
 }
@@ -73893,7 +73989,7 @@ function buildSuppressedFindingMatcher(threads) {
         }
         const hasHumanDisagreement = thread.comments
             .filter((comment) => comment !== firstCodeBeatComment)
-            .some((comment) => isHumanReviewReply(comment.author) && isSuppressiveReply(comment.body));
+            .some((comment) => review_isHumanReviewReply(comment.author) && isSuppressiveReply(comment.body));
         if (!thread.isResolved && !hasHumanDisagreement) {
             continue;
         }
@@ -73919,7 +74015,7 @@ function parseCodeBeatInlineCommentTitle(body) {
     const match = /^\*\*(?:\S+\s+)?(?:blocker|major|minor):\s+(.+?)\*\*/i.exec(body.trim());
     return match?.[1]?.trim();
 }
-function isHumanReviewReply(author) {
+function review_isHumanReviewReply(author) {
     return author !== "github-actions" && !author.endsWith("[bot]");
 }
 function isSuppressiveReply(body) {
@@ -74076,8 +74172,6 @@ function clampScore(score) {
 
 
 
-const MAX_REVIEW_THREADS = 40;
-const MAX_THREAD_COMMENT_BODY = 800;
 async function run() {
     let cleanupProcessingReaction;
     try {
@@ -74100,8 +74194,11 @@ async function run() {
         const octokit = getOctokit(token);
         const { owner, repo } = github_context.repo;
         const prNumber = pullRequest.number;
+        console.log(`Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
         const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
         cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
+        const fetchStartedAt = Date.now();
+        console.log("Code Beat GitHub context fetch start");
         const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
             owner,
             repo,
@@ -74123,6 +74220,11 @@ async function run() {
             }),
             fetchReviewThreads(octokit, owner, repo, prNumber)
         ]);
+        console.log(`Code Beat GitHub context fetch complete in ${Date.now() - fetchStartedAt}ms: ` +
+            `${files.length} file(s), ${issueComments.length} issue comment(s), ${reviewComments.length} review comment(s), ` +
+            `${reviewThreads.length} review thread(s)`);
+        const reviewStartedAt = Date.now();
+        console.log("Code Beat AI review start");
         const review = await reviewPullRequest({
             apiKey,
             model,
@@ -74155,6 +74257,7 @@ async function run() {
             codeQualityRuns,
             workspaceRoot: process.env.GITHUB_WORKSPACE ?? process.cwd()
         });
+        console.log(`Code Beat AI review complete in ${Date.now() - reviewStartedAt}ms`);
         const body = formatReviewBody({
             result: review.result,
             postedComments: review.comments,
@@ -74162,6 +74265,7 @@ async function run() {
             truncatedDiff: review.truncatedDiff
         });
         if (review.comments.length > 0) {
+            console.log(`Code Beat posting PR review with ${review.comments.length} inline comment(s)`);
             await octokit.rest.pulls.createReview({
                 owner,
                 repo,
@@ -74177,6 +74281,7 @@ async function run() {
             });
         }
         else {
+            console.log("Code Beat posting summary issue comment with no inline comments");
             await octokit.rest.issues.createComment({
                 owner,
                 repo,
@@ -74189,6 +74294,7 @@ async function run() {
         if (review.result.score >= 5) {
             await addIssueReaction(octokit, owner, repo, prNumber, "+1");
         }
+        console.log(`Code Beat complete: score=${review.result.score}, inline-comments=${review.comments.length}`);
         setOutput("score", String(review.result.score));
         setOutput("summary", review.result.summary);
         setOutput("inline-comments", String(review.comments.length));
@@ -74252,7 +74358,7 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
             isOutdated
             path
             line
-            comments(first: 10) {
+            comments(first: 20) {
               nodes {
                 author {
                   login
@@ -74291,29 +74397,22 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
                 if (!thread) {
                     continue;
                 }
-                const comments = thread.comments.nodes
-                    .filter((comment) => comment !== null)
-                    .map((comment) => ({
-                    author: comment.author?.login ?? "unknown",
-                    body: truncateText(comment.body, MAX_THREAD_COMMENT_BODY),
-                    path: comment.path ?? undefined,
-                    line: comment.line ?? undefined,
-                    createdAt: comment.createdAt,
-                    url: comment.url ?? undefined
-                }));
-                if (!thread.isResolved && !comments.some((comment) => lib_isHumanReviewReply(comment.author))) {
-                    continue;
-                }
                 threads.push({
                     isResolved: thread.isResolved,
                     isOutdated: thread.isOutdated,
                     path: thread.path ?? undefined,
                     line: thread.line ?? undefined,
-                    comments
+                    comments: thread.comments.nodes
+                        .filter((comment) => comment !== null)
+                        .map((comment) => ({
+                        author: comment.author?.login ?? "unknown",
+                        body: comment.body,
+                        path: comment.path ?? undefined,
+                        line: comment.line ?? undefined,
+                        createdAt: comment.createdAt,
+                        url: comment.url ?? undefined
+                    }))
                 });
-                if (threads.length >= MAX_REVIEW_THREADS) {
-                    return threads;
-                }
             }
             after = reviewThreads.pageInfo.endCursor ?? undefined;
             if (!reviewThreads.pageInfo.hasNextPage) {
@@ -74326,9 +74425,6 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
         console.warn(`::warning::Could not fetch pull request review threads: ${lib_formatError(error)}`);
         return [];
     }
-}
-function lib_isHumanReviewReply(author) {
-    return author !== "github-actions" && !author.endsWith("[bot]");
 }
 function parseIntegerInput(name, fallback) {
     const value = getInput(name);
@@ -74354,13 +74450,6 @@ function parseOptionalNumberInput(name) {
 }
 function lib_formatError(error) {
     return error instanceof Error ? error.message : String(error);
-}
-function truncateText(value, maxLength) {
-    const trimmed = value.trim();
-    if (trimmed.length <= maxLength) {
-        return trimmed;
-    }
-    return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 void run();
 //# sourceMappingURL=index.js.map

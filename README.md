@@ -102,7 +102,7 @@ The worker agents can inspect more than the diff when they need it:
 
 - pull request metadata
 - existing PR comments and review comments
-- review thread state, including resolved threads and replies
+- review thread state, including resolved threads and replies, through a dedicated `getReviewThreads` tool
 - repository instruction files
 - full file contents from the checkout
 - line windows around changed code
