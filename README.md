@@ -102,6 +102,7 @@ The worker agents can inspect more than the diff when they need it:
 
 - pull request metadata
 - existing PR comments and review comments
+- review thread state, including resolved threads and replies
 - repository instruction files
 - full file contents from the checkout
 - line windows around changed code
@@ -117,9 +118,16 @@ After workers finish:
 1. General review outputs are consolidated.
 2. Code-quality outputs are consolidated.
 3. The final orchestrator merges both categories, removes overlap, assigns a score, and selects findings.
-4. Code Beat only posts inline comments that map to added lines in the PR diff.
+4. Code Beat suppresses repeated findings from resolved or human-disputed prior Code Beat threads.
+5. Code Beat only posts inline comments that map to added lines in the PR diff.
 
 This keeps the public review concise even when several agents explored the PR.
+
+### PR Conversation Memory
+
+On each run, Code Beat reads existing PR comments, review comments, and review threads. Resolved Code Beat threads and human replies like "not valid", "false positive", "intentional", or "by design" are treated as strong signals not to repeat the same finding.
+
+This is not an absolute ban. If new code materially changes the evidence, agents may re-raise an issue, but they are instructed to explain why it is still actionable.
 
 ### Error Handling
 

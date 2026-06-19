@@ -3,6 +3,7 @@ import { getInput, setFailed, setOutput } from "./action-core.js";
 import { formatInlineComment, formatReviewBody } from "./format.js";
 import { reviewPullRequest } from "./review.js";
 import type { PullRequestFile } from "./diff.js";
+import type { PullRequestReviewThreadContext } from "./review.js";
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
@@ -41,7 +42,7 @@ async function run(): Promise<void> {
       pull_number: prNumber,
       per_page: 100
     });
-    const [issueComments, reviewComments] = await Promise.all([
+    const [issueComments, reviewComments, reviewThreads] = await Promise.all([
       octokit.paginate(octokit.rest.issues.listComments, {
         owner,
         repo,
@@ -53,7 +54,8 @@ async function run(): Promise<void> {
         repo,
         pull_number: prNumber,
         per_page: 100
-      })
+      }),
+      fetchReviewThreads(octokit, owner, repo, prNumber)
     ]);
 
     const review = await reviewPullRequest({
@@ -80,7 +82,8 @@ async function run(): Promise<void> {
           path: comment.path,
           line: comment.line ?? undefined,
           createdAt: comment.created_at
-        }))
+        })),
+        reviewThreads
       },
       maxComments,
       reviewRuns,
@@ -198,6 +201,124 @@ async function removeIssueReaction(
     });
   } catch (error) {
     console.warn(`::warning::Could not remove ${content} reaction from pull request: ${formatError(error)}`);
+  }
+}
+
+interface ReviewThreadsQueryResponse {
+  repository?: {
+    pullRequest?: {
+      reviewThreads: {
+        nodes: Array<{
+          isResolved: boolean;
+          isOutdated: boolean;
+          path?: string | null;
+          line?: number | null;
+          comments: {
+            nodes: Array<{
+              author?: { login: string } | null;
+              body: string;
+              createdAt: string;
+              path?: string | null;
+              line?: number | null;
+              url?: string | null;
+            } | null>;
+          };
+        } | null>;
+        pageInfo: {
+          hasNextPage: boolean;
+          endCursor?: string | null;
+        };
+      };
+    } | null;
+  } | null;
+}
+
+async function fetchReviewThreads(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number
+): Promise<PullRequestReviewThreadContext[]> {
+  const query = `query CodeBeatReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $after) {
+          nodes {
+            isResolved
+            isOutdated
+            path
+            line
+            comments(first: 20) {
+              nodes {
+                author {
+                  login
+                }
+                body
+                createdAt
+                path
+                line
+                url
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }`;
+
+  try {
+    const threads: PullRequestReviewThreadContext[] = [];
+    let after: string | undefined;
+
+    do {
+      const response = await octokit.graphql<ReviewThreadsQueryResponse>(query, {
+        owner,
+        repo,
+        number: prNumber,
+        after
+      });
+      const reviewThreads = response.repository?.pullRequest?.reviewThreads;
+      if (!reviewThreads) {
+        return threads;
+      }
+
+      for (const thread of reviewThreads.nodes) {
+        if (!thread) {
+          continue;
+        }
+
+        threads.push({
+          isResolved: thread.isResolved,
+          isOutdated: thread.isOutdated,
+          path: thread.path ?? undefined,
+          line: thread.line ?? undefined,
+          comments: thread.comments.nodes
+            .filter((comment) => comment !== null)
+            .map((comment) => ({
+              author: comment.author?.login ?? "unknown",
+              body: comment.body,
+              path: comment.path ?? undefined,
+              line: comment.line ?? undefined,
+              createdAt: comment.createdAt,
+              url: comment.url ?? undefined
+            }))
+        });
+      }
+
+      after = reviewThreads.pageInfo.endCursor ?? undefined;
+      if (!reviewThreads.pageInfo.hasNextPage) {
+        break;
+      }
+    } while (after);
+
+    return threads;
+  } catch (error) {
+    console.warn(`::warning::Could not fetch pull request review threads: ${formatError(error)}`);
+    return [];
   }
 }
 

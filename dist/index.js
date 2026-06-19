@@ -73356,7 +73356,7 @@ function createReviewTools(context) {
             execute: async () => context.prDetails
         }),
         getPrComments: tool({
-            description: "Return existing pull request issue comments and review comments.",
+            description: "Return existing pull request issue comments, review comments, and review thread state including resolved threads and replies.",
             inputSchema: object({}),
             execute: async () => context.prComments
         }),
@@ -73613,11 +73613,12 @@ async function reviewPullRequest(input) {
         input,
         model
     });
-    const { comments, skippedCommentCount } = selectInlineComments(finalResult.findings, diffContext.commentableLines, input.maxComments);
+    const resultWithThreadFeedback = applyReviewThreadFeedback(finalResult, input.comments.reviewThreads);
+    const { comments, skippedCommentCount } = selectInlineComments(resultWithThreadFeedback.findings, diffContext.commentableLines, input.maxComments);
     return {
         result: {
-            ...finalResult,
-            score: clampScore(finalResult.score)
+            ...resultWithThreadFeedback,
+            score: clampScore(resultWithThreadFeedback.score)
         },
         comments,
         skippedCommentCount,
@@ -73780,6 +73781,7 @@ Pull request body:
 ${input.body || "(empty)"}
 
 Existing PR comments and review comments are available through tools.
+Prior review threads, including resolved threads and human replies, are available through tools.
 
 Repository instructions discovered up front:
 ${repoInstructions || "(none found)"}
@@ -73789,6 +73791,8 @@ Inline comment rules:
 - Use the exact file path and new-line number from the diff.
 - Keep comments specific, actionable, and focused on issues worth raising.
 - Prefer fewer high-conviction findings over many weak comments.
+- Do not repeat prior Code Beat findings from resolved threads or threads where a human explained the issue was invalid, intentional, expected, or already handled.
+- If you re-raise a previously disputed finding, explain what new evidence makes it still actionable.
 - Return JSON only, with shape:
 {"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}
 
@@ -73858,6 +73862,89 @@ function normalizeAgentFinding(value, defaultCategory) {
         evidence: truncate(String(input.evidence ?? finding.body), 1500),
         category
     };
+}
+function applyReviewThreadFeedback(result, threads) {
+    const suppressed = buildSuppressedFindingMatcher(threads);
+    if (!suppressed) {
+        return result;
+    }
+    const findings = result.findings.filter((finding) => !suppressed(finding));
+    if (findings.length === result.findings.length) {
+        return result;
+    }
+    if (findings.length === 0) {
+        return {
+            score: 5,
+            summary: "No new actionable findings after accounting for resolved or disputed prior Code Beat review threads.",
+            findings
+        };
+    }
+    return {
+        ...result,
+        findings
+    };
+}
+function buildSuppressedFindingMatcher(threads) {
+    const keys = new Set();
+    for (const thread of threads) {
+        const firstCodeBeatComment = thread.comments.find((comment) => isCodeBeatInlineComment(comment.body));
+        if (!firstCodeBeatComment) {
+            continue;
+        }
+        const hasHumanDisagreement = thread.comments
+            .filter((comment) => comment !== firstCodeBeatComment)
+            .some((comment) => isHumanReviewReply(comment.author) && isSuppressiveReply(comment.body));
+        if (!thread.isResolved && !hasHumanDisagreement) {
+            continue;
+        }
+        const path = firstCodeBeatComment.path ?? thread.path;
+        const line = firstCodeBeatComment.line ?? thread.line;
+        const title = parseCodeBeatInlineCommentTitle(firstCodeBeatComment.body);
+        if (path && line !== undefined) {
+            keys.add(findingLocationKey(path, line));
+        }
+        if (path && title) {
+            keys.add(findingTitleKey(path, title));
+        }
+    }
+    if (keys.size === 0) {
+        return undefined;
+    }
+    return (finding) => keys.has(findingLocationKey(finding.path, finding.line)) || keys.has(findingTitleKey(finding.path, finding.title));
+}
+function isCodeBeatInlineComment(body) {
+    return parseCodeBeatInlineCommentTitle(body) !== undefined;
+}
+function parseCodeBeatInlineCommentTitle(body) {
+    const match = /^\*\*(?:\S+\s+)?(?:blocker|major|minor):\s+(.+?)\*\*/i.exec(body.trim());
+    return match?.[1]?.trim();
+}
+function isHumanReviewReply(author) {
+    return author !== "github-actions" && !author.endsWith("[bot]");
+}
+function isSuppressiveReply(body) {
+    const normalized = body.toLowerCase();
+    return [
+        "not valid",
+        "invalid",
+        "false positive",
+        "not an issue",
+        "intentional",
+        "expected",
+        "by design",
+        "already handled",
+        "won't fix",
+        "wont fix"
+    ].some((phrase) => normalized.includes(phrase));
+}
+function findingLocationKey(path, line) {
+    return `location:${path}:${line}`;
+}
+function findingTitleKey(path, title) {
+    return `title:${path}:${normalizeTitle(title)}`;
+}
+function normalizeTitle(title) {
+    return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 function mergeAgentResults(category, results, summaryPrefix) {
     const findings = [];
@@ -74019,7 +74106,7 @@ async function run() {
             pull_number: prNumber,
             per_page: 100
         });
-        const [issueComments, reviewComments] = await Promise.all([
+        const [issueComments, reviewComments, reviewThreads] = await Promise.all([
             octokit.paginate(octokit.rest.issues.listComments, {
                 owner,
                 repo,
@@ -74031,7 +74118,8 @@ async function run() {
                 repo,
                 pull_number: prNumber,
                 per_page: 100
-            })
+            }),
+            fetchReviewThreads(octokit, owner, repo, prNumber)
         ]);
         const review = await reviewPullRequest({
             apiKey,
@@ -74057,7 +74145,8 @@ async function run() {
                     path: comment.path,
                     line: comment.line ?? undefined,
                     createdAt: comment.created_at
-                }))
+                })),
+                reviewThreads
             },
             maxComments,
             reviewRuns,
@@ -74149,6 +74238,84 @@ async function removeIssueReaction(octokit, owner, repo, issueNumber, reactionId
     }
     catch (error) {
         console.warn(`::warning::Could not remove ${content} reaction from pull request: ${lib_formatError(error)}`);
+    }
+}
+async function fetchReviewThreads(octokit, owner, repo, prNumber) {
+    const query = `query CodeBeatReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $after) {
+          nodes {
+            isResolved
+            isOutdated
+            path
+            line
+            comments(first: 20) {
+              nodes {
+                author {
+                  login
+                }
+                body
+                createdAt
+                path
+                line
+                url
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }`;
+    try {
+        const threads = [];
+        let after;
+        do {
+            const response = await octokit.graphql(query, {
+                owner,
+                repo,
+                number: prNumber,
+                after
+            });
+            const reviewThreads = response.repository?.pullRequest?.reviewThreads;
+            if (!reviewThreads) {
+                return threads;
+            }
+            for (const thread of reviewThreads.nodes) {
+                if (!thread) {
+                    continue;
+                }
+                threads.push({
+                    isResolved: thread.isResolved,
+                    isOutdated: thread.isOutdated,
+                    path: thread.path ?? undefined,
+                    line: thread.line ?? undefined,
+                    comments: thread.comments.nodes
+                        .filter((comment) => comment !== null)
+                        .map((comment) => ({
+                        author: comment.author?.login ?? "unknown",
+                        body: comment.body,
+                        path: comment.path ?? undefined,
+                        line: comment.line ?? undefined,
+                        createdAt: comment.createdAt,
+                        url: comment.url ?? undefined
+                    }))
+                });
+            }
+            after = reviewThreads.pageInfo.endCursor ?? undefined;
+            if (!reviewThreads.pageInfo.hasNextPage) {
+                break;
+            }
+        } while (after);
+        return threads;
+    }
+    catch (error) {
+        console.warn(`::warning::Could not fetch pull request review threads: ${lib_formatError(error)}`);
+        return [];
     }
 }
 function parseIntegerInput(name, fallback) {

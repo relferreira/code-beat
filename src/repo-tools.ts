@@ -55,7 +55,8 @@ export function createReviewTools(context: RepoToolContext) {
       execute: async () => context.prDetails
     }),
     getPrComments: tool({
-      description: "Return existing pull request issue comments and review comments.",
+      description:
+        "Return existing pull request issue comments, review comments, and review thread state including resolved threads and replies.",
       inputSchema: z.object({}),
       execute: async () => context.prComments
     }),
