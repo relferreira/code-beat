@@ -61,46 +61,21 @@ For a risky PR, it posts a review with inline comments and a lower score.
 
 ## How the Agent Works
 
-Code Beat is not a single prompt over a diff. It builds PR context, gives each worker agent read-only repository tools, runs independent review passes in parallel, then asks the model to consolidate the strongest findings.
+Code Beat is not a single prompt over a diff. It runs parallel review categories over the same PR context, then consolidates the strongest findings into one score and one review.
 
 ```mermaid
 flowchart TD
-  A[Pull request event] --> B[GitHub checkout]
-  B --> C[Code Beat action]
+  PR[Pull request] --> Review[Review agents]
+  PR --> Quality[Code-quality agents]
 
-  C --> D[Collect context]
-  D --> D1[PR title, body, author, refs]
-  D --> D2[Changed files and patches]
-  D --> D3[Existing PR comments and review comments]
-  D --> D4[Repository instructions: AGENTS.md, CLAUDE.md, cursor rules, Copilot instructions]
+  Review --> ReviewSummary[Review consolidation]
+  Quality --> QualitySummary[Code-quality consolidation]
 
-  C --> E[Create read-only tools]
-  E --> E1[getPrDetails]
-  E --> E2[getPrComments]
-  E --> E3[getRepoInstructions]
-  E --> E4[readFile and readFileAroundLine]
-  E --> E5[listFiles and searchRepo]
+  ReviewSummary --> Final[Final consolidation]
+  QualitySummary --> Final
 
-  D --> F[Parallel worker agents]
-  E --> F
-
-  F --> R1[Review pass 1]
-  F --> R2[Review pass 2]
-  F --> Q1[Code-quality pass 1]
-  F --> Q2[Code-quality pass 2]
-
-  R1 --> G[General review consolidation]
-  R2 --> G
-  Q1 --> H[Code-quality consolidation]
-  Q2 --> H
-
-  G --> I[Final orchestrator]
-  H --> I
-
-  I --> J[Score 0 to 5]
-  I --> K[Ranked findings]
-  K --> L[Filter to added diff lines]
-  L --> M[Post PR review and inline comments]
+  Final --> Score[Score 0 to 5]
+  Final --> Comments[PR review and comments]
 ```
 
 ### Worker Agents
