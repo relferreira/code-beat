@@ -43,10 +43,10 @@ That is enough for the default review pipeline:
 
 Code Beat creates one PR review summary with a score and, when useful, inline comments on added diff lines.
 
-It also adds lightweight PR reactions:
+It also uses lightweight PR reactions:
 
-- `👀` when review starts
-- `👍` when review finishes with a `5/5`
+- `👀` while review is running
+- replaces `👀` with `👍` when review finishes with a `5/5`
 
 GitHub only supports a fixed set of reaction emojis, so custom reactions like `🥁` are not available through the API.
 

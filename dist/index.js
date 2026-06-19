@@ -73990,6 +73990,7 @@ function clampScore(score) {
 
 
 async function run() {
+    let cleanupProcessingReaction;
     try {
         const pullRequest = github_context.payload.pull_request;
         if (!pullRequest) {
@@ -74010,7 +74011,8 @@ async function run() {
         const octokit = getOctokit(token);
         const { owner, repo } = github_context.repo;
         const prNumber = pullRequest.number;
-        await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
+        const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
+        cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
         const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
             owner,
             repo,
@@ -74091,6 +74093,8 @@ async function run() {
                 body
             });
         }
+        await cleanupProcessingReaction();
+        cleanupProcessingReaction = undefined;
         if (review.result.score >= 5) {
             await addIssueReaction(octokit, owner, repo, prNumber, "+1");
         }
@@ -74102,6 +74106,7 @@ async function run() {
         }
     }
     catch (error) {
+        await cleanupProcessingReaction?.();
         setFailed(error instanceof Error ? error.message : String(error));
     }
 }
@@ -74117,15 +74122,33 @@ function toPullRequestFile(file) {
 }
 async function addIssueReaction(octokit, owner, repo, issueNumber, content) {
     try {
-        await octokit.rest.reactions.createForIssue({
+        const response = await octokit.rest.reactions.createForIssue({
             owner,
             repo,
             issue_number: issueNumber,
             content
         });
+        return response.data.id;
     }
     catch (error) {
         console.warn(`::warning::Could not add ${content} reaction to pull request: ${lib_formatError(error)}`);
+        return undefined;
+    }
+}
+async function removeIssueReaction(octokit, owner, repo, issueNumber, reactionId, content) {
+    if (reactionId === undefined) {
+        return;
+    }
+    try {
+        await octokit.rest.reactions.deleteForIssue({
+            owner,
+            repo,
+            issue_number: issueNumber,
+            reaction_id: reactionId
+        });
+    }
+    catch (error) {
+        console.warn(`::warning::Could not remove ${content} reaction from pull request: ${lib_formatError(error)}`);
     }
 }
 function parseIntegerInput(name, fallback) {

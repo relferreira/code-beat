@@ -7,6 +7,8 @@ import type { PullRequestFile } from "./diff.js";
 type Octokit = ReturnType<typeof github.getOctokit>;
 
 async function run(): Promise<void> {
+  let cleanupProcessingReaction: (() => Promise<void>) | undefined;
+
   try {
     const pullRequest = github.context.payload.pull_request;
     if (!pullRequest) {
@@ -30,7 +32,8 @@ async function run(): Promise<void> {
     const { owner, repo } = github.context.repo;
     const prNumber = pullRequest.number;
 
-    await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
+    const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
+    cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
 
     const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
       owner,
@@ -115,6 +118,9 @@ async function run(): Promise<void> {
       });
     }
 
+    await cleanupProcessingReaction();
+    cleanupProcessingReaction = undefined;
+
     if (review.result.score >= 5) {
       await addIssueReaction(octokit, owner, repo, prNumber, "+1");
     }
@@ -127,6 +133,7 @@ async function run(): Promise<void> {
       setFailed(`Code Beat score ${review.result.score}/5 is below threshold ${failOnScoreBelow}.`);
     }
   } catch (error) {
+    await cleanupProcessingReaction?.();
     setFailed(error instanceof Error ? error.message : String(error));
   }
 }
@@ -155,16 +162,42 @@ async function addIssueReaction(
   repo: string,
   issueNumber: number,
   content: "eyes" | "+1"
-): Promise<void> {
+): Promise<number | undefined> {
   try {
-    await octokit.rest.reactions.createForIssue({
+    const response = await octokit.rest.reactions.createForIssue({
       owner,
       repo,
       issue_number: issueNumber,
       content
     });
+    return response.data.id;
   } catch (error) {
     console.warn(`::warning::Could not add ${content} reaction to pull request: ${formatError(error)}`);
+    return undefined;
+  }
+}
+
+async function removeIssueReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  reactionId: number | undefined,
+  content: "eyes" | "+1"
+): Promise<void> {
+  if (reactionId === undefined) {
+    return;
+  }
+
+  try {
+    await octokit.rest.reactions.deleteForIssue({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      reaction_id: reactionId
+    });
+  } catch (error) {
+    console.warn(`::warning::Could not remove ${content} reaction from pull request: ${formatError(error)}`);
   }
 }
 
