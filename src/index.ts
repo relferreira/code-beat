@@ -7,6 +7,9 @@ import type { PullRequestReviewThreadContext } from "./review.js";
 
 type Octokit = ReturnType<typeof github.getOctokit>;
 
+const MAX_REVIEW_THREADS = 40;
+const MAX_THREAD_COMMENT_BODY = 800;
+
 async function run(): Promise<void> {
   let cleanupProcessingReaction: (() => Promise<void>) | undefined;
 
@@ -248,7 +251,7 @@ async function fetchReviewThreads(
             isOutdated
             path
             line
-            comments(first: 20) {
+            comments(first: 10) {
               nodes {
                 author {
                   login
@@ -291,22 +294,30 @@ async function fetchReviewThreads(
           continue;
         }
 
+        const comments = thread.comments.nodes
+          .filter((comment) => comment !== null)
+          .map((comment) => ({
+            author: comment.author?.login ?? "unknown",
+            body: truncateText(comment.body, MAX_THREAD_COMMENT_BODY),
+            path: comment.path ?? undefined,
+            line: comment.line ?? undefined,
+            createdAt: comment.createdAt,
+            url: comment.url ?? undefined
+          }));
+        if (!thread.isResolved && !comments.some((comment) => isHumanReviewReply(comment.author))) {
+          continue;
+        }
+
         threads.push({
           isResolved: thread.isResolved,
           isOutdated: thread.isOutdated,
           path: thread.path ?? undefined,
           line: thread.line ?? undefined,
-          comments: thread.comments.nodes
-            .filter((comment) => comment !== null)
-            .map((comment) => ({
-              author: comment.author?.login ?? "unknown",
-              body: comment.body,
-              path: comment.path ?? undefined,
-              line: comment.line ?? undefined,
-              createdAt: comment.createdAt,
-              url: comment.url ?? undefined
-            }))
+          comments
         });
+        if (threads.length >= MAX_REVIEW_THREADS) {
+          return threads;
+        }
       }
 
       after = reviewThreads.pageInfo.endCursor ?? undefined;
@@ -320,6 +331,10 @@ async function fetchReviewThreads(
     console.warn(`::warning::Could not fetch pull request review threads: ${formatError(error)}`);
     return [];
   }
+}
+
+function isHumanReviewReply(author: string): boolean {
+  return author !== "github-actions" && !author.endsWith("[bot]");
 }
 
 function parseIntegerInput(name: string, fallback: number): number {
@@ -352,6 +367,15 @@ function parseOptionalNumberInput(name: string): number | undefined {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 void run();

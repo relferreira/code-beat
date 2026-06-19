@@ -74076,6 +74076,8 @@ function clampScore(score) {
 
 
 
+const MAX_REVIEW_THREADS = 40;
+const MAX_THREAD_COMMENT_BODY = 800;
 async function run() {
     let cleanupProcessingReaction;
     try {
@@ -74250,7 +74252,7 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
             isOutdated
             path
             line
-            comments(first: 20) {
+            comments(first: 10) {
               nodes {
                 author {
                   login
@@ -74289,22 +74291,29 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
                 if (!thread) {
                     continue;
                 }
+                const comments = thread.comments.nodes
+                    .filter((comment) => comment !== null)
+                    .map((comment) => ({
+                    author: comment.author?.login ?? "unknown",
+                    body: truncateText(comment.body, MAX_THREAD_COMMENT_BODY),
+                    path: comment.path ?? undefined,
+                    line: comment.line ?? undefined,
+                    createdAt: comment.createdAt,
+                    url: comment.url ?? undefined
+                }));
+                if (!thread.isResolved && !comments.some((comment) => lib_isHumanReviewReply(comment.author))) {
+                    continue;
+                }
                 threads.push({
                     isResolved: thread.isResolved,
                     isOutdated: thread.isOutdated,
                     path: thread.path ?? undefined,
                     line: thread.line ?? undefined,
-                    comments: thread.comments.nodes
-                        .filter((comment) => comment !== null)
-                        .map((comment) => ({
-                        author: comment.author?.login ?? "unknown",
-                        body: comment.body,
-                        path: comment.path ?? undefined,
-                        line: comment.line ?? undefined,
-                        createdAt: comment.createdAt,
-                        url: comment.url ?? undefined
-                    }))
+                    comments
                 });
+                if (threads.length >= MAX_REVIEW_THREADS) {
+                    return threads;
+                }
             }
             after = reviewThreads.pageInfo.endCursor ?? undefined;
             if (!reviewThreads.pageInfo.hasNextPage) {
@@ -74317,6 +74326,9 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
         console.warn(`::warning::Could not fetch pull request review threads: ${lib_formatError(error)}`);
         return [];
     }
+}
+function lib_isHumanReviewReply(author) {
+    return author !== "github-actions" && !author.endsWith("[bot]");
 }
 function parseIntegerInput(name, fallback) {
     const value = getInput(name);
@@ -74342,6 +74354,13 @@ function parseOptionalNumberInput(name) {
 }
 function lib_formatError(error) {
     return error instanceof Error ? error.message : String(error);
+}
+function truncateText(value, maxLength) {
+    const trimmed = value.trim();
+    if (trimmed.length <= maxLength) {
+        return trimmed;
+    }
+    return `${trimmed.slice(0, maxLength - 1).trimEnd()}…`;
 }
 void run();
 //# sourceMappingURL=index.js.map
