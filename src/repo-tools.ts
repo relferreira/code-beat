@@ -61,14 +61,18 @@ export function createReviewTools(context: RepoToolContext) {
     getPrDetails: tool({
       description: "Return pull request metadata, changed files, and patches.",
       inputSchema: z.object({}),
-      execute: async () => context.prDetails
+      execute: async () => {
+        console.log("Code Beat tool call: getPrDetails");
+        return context.prDetails;
+      }
     }),
     getPrComments: tool({
       description:
-        "Return existing pull request issue comments and review comments plus review thread counts. Use getReviewThreads for resolved thread state and replies.",
+        "Return all existing pull request issue comments, review comments, and review threads. Use getReviewThreads for filtered or paginated thread lookup.",
       inputSchema: z.object({}),
       execute: async () => {
-        console.log("Code Beat tool call: getPrComments");
+        const counts = describePrComments(context.prComments);
+        console.log(`Code Beat tool call: getPrComments returned ${counts}`);
         return context.prComments;
       }
     }),
@@ -87,7 +91,11 @@ export function createReviewTools(context: RepoToolContext) {
       execute: async (args) => {
         const result = filterReviewThreads(context.prReviewThreads, args);
         console.log(
-          `Code Beat tool call: getReviewThreads returned ${result.threads.length}/${result.totalMatching} thread(s)`
+          `Code Beat tool call: getReviewThreads path=${args.path ?? "(any)"} query=${
+            args.query ? "(provided)" : "(none)"
+          } includeResolved=${args.includeResolved} includeUnresolved=${args.includeUnresolved} ` +
+            `onlyWithHumanReplies=${args.onlyWithHumanReplies} offset=${args.offset} limit=${args.limit} ` +
+            `returned ${result.threads.length}/${result.totalMatching} matching thread(s), moreAvailable=${result.moreAvailable}`
         );
         return result;
       }
@@ -95,9 +103,12 @@ export function createReviewTools(context: RepoToolContext) {
     getRepoInstructions: tool({
       description: "Return repository-level agent/review instructions discovered in the checkout.",
       inputSchema: z.object({}),
-      execute: async () => ({
-        instructions: context.repoInstructions || "No repository instruction files were found."
-      })
+      execute: async () => {
+        console.log(`Code Beat tool call: getRepoInstructions chars=${context.repoInstructions.length}`);
+        return {
+          instructions: context.repoInstructions || "No repository instruction files were found."
+        };
+      }
     }),
     readFile: tool({
       description: "Read a UTF-8 text file from the checked-out repository.",
@@ -105,8 +116,9 @@ export function createReviewTools(context: RepoToolContext) {
         path: z.string().describe("Repository-relative file path.")
       }),
       execute: async ({ path }) => {
-        console.log(`Code Beat tool call: readFile ${path}`);
-        return readRepoFile(context.root, path);
+        const result = readRepoFile(context.root, path);
+        console.log(`Code Beat tool call: readFile ${path} -> ${describeReadResult(result)}`);
+        return result;
       }
     }),
     readFileAroundLine: tool({
@@ -117,8 +129,9 @@ export function createReviewTools(context: RepoToolContext) {
         radius: z.number().int().min(1).max(80).default(30)
       }),
       execute: async ({ path, line, radius }) => {
-        console.log(`Code Beat tool call: readFileAroundLine ${path}:${line} radius=${radius}`);
-        return readFileAroundLine(context.root, path, line, radius);
+        const result = readFileAroundLine(context.root, path, line, radius);
+        console.log(`Code Beat tool call: readFileAroundLine ${path}:${line} radius=${radius} -> ${describeReadResult(result)}`);
+        return result;
       }
     }),
     listFiles: tool({
@@ -191,12 +204,37 @@ function filterReviewThreads(
     offset: args.offset,
     limit: args.limit,
     truncated: args.offset + args.limit < filtered.length,
+    moreAvailable: args.offset + args.limit < filtered.length,
     threads: filtered.slice(args.offset, args.offset + args.limit)
   };
 }
 
 function isHumanReviewReply(author: string): boolean {
   return author !== "github-actions" && !author.endsWith("[bot]");
+}
+
+function describePrComments(value: unknown): string {
+  const record = value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const issueComments = Array.isArray(record.issueComments) ? record.issueComments.length : 0;
+  const reviewComments = Array.isArray(record.reviewComments) ? record.reviewComments.length : 0;
+  const reviewThreads = Array.isArray(record.reviewThreads) ? record.reviewThreads : [];
+  const threadCommentCount = reviewThreads.reduce((sum, thread) => {
+    if (thread !== null && typeof thread === "object" && Array.isArray((thread as { comments?: unknown }).comments)) {
+      return sum + ((thread as { comments: unknown[] }).comments.length ?? 0);
+    }
+
+    return sum;
+  }, 0);
+  return `${issueComments} issue comment(s), ${reviewComments} review comment(s), ${reviewThreads.length} review thread(s), ${threadCommentCount} thread comment(s)`;
+}
+
+function describeReadResult(result: { content: string; truncated: boolean } | { error: string } | { content: string; truncated: boolean; start?: number; end?: number }): string {
+  if ("error" in result) {
+    return `error="${result.error}"`;
+  }
+
+  const range = "start" in result && "end" in result ? ` lines=${result.start}-${result.end}` : "";
+  return `chars=${result.content.length}${range} truncated=${result.truncated}`;
 }
 
 export function collectRepoInstructions(root: string): string {

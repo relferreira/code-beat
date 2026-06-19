@@ -74,7 +74,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   console.log(
     `Code Beat context: ${input.files.length} file(s), ${input.comments.issueComments.length} issue comment(s), ` +
       `${input.comments.reviewComments.length} review comment(s), ${input.comments.reviewThreads.length} review thread(s), ` +
-      `diff truncated=${diffContext.truncated}`
+      `diff prompt chars=${diffContext.prompt.length}, diff truncated=${diffContext.truncated}`
   );
   const tools = createReviewTools({
     root: input.workspaceRoot,
@@ -82,8 +82,10 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
     prComments: {
       issueComments: input.comments.issueComments,
       reviewComments: input.comments.reviewComments,
+      reviewThreads: input.comments.reviewThreads,
       reviewThreadCount: input.comments.reviewThreads.length,
-      note: "Use getReviewThreads to inspect resolved review threads and human replies."
+      note:
+        "Full PR conversation context is included here. Use getReviewThreads when you want filtered or paginated review-thread lookup."
     },
     prReviewThreads: input.comments.reviewThreads,
     repoInstructions
@@ -113,11 +115,16 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   ];
 
   const workerResults = await Promise.all(workerRuns);
-  console.log(
-    `Code Beat workers complete: ${workerResults.filter((result) => !result.skipped).length}/${workerResults.length} valid output(s)`
-  );
   const skippedWorkerErrors = workerResults.flatMap((result) => (result.error ? [result.error] : []));
+  console.log(
+    `Code Beat workers complete: ${workerResults.filter((result) => !result.skipped).length}/${workerResults.length} valid output(s), ` +
+      `${skippedWorkerErrors.length} skipped`
+  );
   if (workerRuns.length > 0 && skippedWorkerErrors.length === workerResults.length) {
+    console.error("Code Beat all workers failed. Worker errors:");
+    for (const [index, error] of skippedWorkerErrors.entries()) {
+      console.error(`Code Beat worker error ${index + 1}: ${error}`);
+    }
     throw new Error(
       `Code Beat could not produce a review because every AI worker failed. First error: ${skippedWorkerErrors[0]}`
     );
@@ -217,11 +224,16 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     });
 
     console.log(
-      `Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms`
+      `Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms, ` +
+        `response chars=${result.text.length}`
+    );
+    const output = parseAgentReviewResultText(result.text, args.category);
+    console.log(
+      `Code Beat worker parsed: ${args.category} pass ${args.passNumber} produced ${output.findings.length} finding(s)`
     );
     return {
       category: args.category,
-      output: parseAgentReviewResultText(result.text, args.category),
+      output,
       skipped: false
     };
   } catch (error) {
