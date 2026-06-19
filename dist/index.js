@@ -73677,6 +73677,10 @@ async function reviewPullRequest(input) {
     ];
     const workerResults = await Promise.all(workerRuns);
     console.log(`Code Beat workers complete: ${workerResults.filter((result) => !result.skipped).length}/${workerResults.length} valid output(s)`);
+    const skippedWorkerErrors = workerResults.flatMap((result) => (result.error ? [result.error] : []));
+    if (workerRuns.length > 0 && skippedWorkerErrors.length === workerResults.length) {
+        throw new Error(`Code Beat could not produce a review because every AI worker failed. First error: ${skippedWorkerErrors[0]}`);
+    }
     const reviewResults = workerResults.filter((result) => result.category === "review" && !result.skipped);
     const codeQualityResults = workerResults.filter((result) => result.category === "code-quality" && !result.skipped);
     const [reviewConsolidation, codeQualityConsolidation] = await Promise.all([
@@ -73758,7 +73762,8 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
                 summary: `${args.category} pass ${args.passNumber} was skipped after an error: ${message}`,
                 findings: []
             },
-            skipped: true
+            skipped: true,
+            error: message
         };
     }
 }
@@ -74194,6 +74199,7 @@ async function run() {
         const octokit = getOctokit(token);
         const { owner, repo } = github_context.repo;
         const prNumber = pullRequest.number;
+        const authenticatedLogin = await getAuthenticatedLogin(octokit);
         console.log(`Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
         const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
         cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
@@ -74294,6 +74300,9 @@ async function run() {
         if (review.result.score >= 5) {
             await addIssueReaction(octokit, owner, repo, prNumber, "+1");
         }
+        else {
+            await removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1", authenticatedLogin);
+        }
         console.log(`Code Beat complete: score=${review.result.score}, inline-comments=${review.comments.length}`);
         setOutput("score", String(review.result.score));
         setOutput("summary", review.result.summary);
@@ -74346,6 +74355,26 @@ async function removeIssueReaction(octokit, owner, repo, issueNumber, reactionId
     }
     catch (error) {
         console.warn(`::warning::Could not remove ${content} reaction from pull request: ${lib_formatError(error)}`);
+    }
+}
+async function removeIssueReactionsByContent(octokit, owner, repo, issueNumber, content, authenticatedLogin) {
+    if (!authenticatedLogin) {
+        return;
+    }
+    try {
+        const reactions = await octokit.paginate(octokit.rest.reactions.listForIssue, {
+            owner,
+            repo,
+            issue_number: issueNumber,
+            content,
+            per_page: 100
+        });
+        await Promise.all(reactions
+            .filter((reaction) => reaction.user?.login === authenticatedLogin)
+            .map((reaction) => removeIssueReaction(octokit, owner, repo, issueNumber, reaction.id, content)));
+    }
+    catch (error) {
+        console.warn(`::warning::Could not list ${content} reactions for cleanup: ${lib_formatError(error)}`);
     }
 }
 async function fetchReviewThreads(octokit, owner, repo, prNumber) {
@@ -74424,6 +74453,17 @@ async function fetchReviewThreads(octokit, owner, repo, prNumber) {
     catch (error) {
         console.warn(`::warning::Could not fetch pull request review threads: ${lib_formatError(error)}`);
         return [];
+    }
+}
+async function getAuthenticatedLogin(octokit) {
+    try {
+        const response = await octokit.rest.users.getAuthenticated();
+        console.log(`Code Beat authenticated as ${response.data.login}`);
+        return response.data.login;
+    }
+    catch (error) {
+        console.warn(`::warning::Could not determine authenticated GitHub user for reaction cleanup: ${lib_formatError(error)}`);
+        return undefined;
     }
 }
 function parseIntegerInput(name, fallback) {

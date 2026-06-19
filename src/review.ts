@@ -58,6 +58,7 @@ interface WorkerRunResult {
   category: ReviewCategory;
   output: AgentReviewResult;
   skipped: boolean;
+  error?: string;
 }
 
 const MAX_AGENT_RUNS = 5;
@@ -115,6 +116,12 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   console.log(
     `Code Beat workers complete: ${workerResults.filter((result) => !result.skipped).length}/${workerResults.length} valid output(s)`
   );
+  const skippedWorkerErrors = workerResults.flatMap((result) => (result.error ? [result.error] : []));
+  if (workerRuns.length > 0 && skippedWorkerErrors.length === workerResults.length) {
+    throw new Error(
+      `Code Beat could not produce a review because every AI worker failed. First error: ${skippedWorkerErrors[0]}`
+    );
+  }
   const reviewResults = workerResults.filter((result) => result.category === "review" && !result.skipped);
   const codeQualityResults = workerResults.filter((result) => result.category === "code-quality" && !result.skipped);
 
@@ -230,7 +237,8 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
         summary: `${args.category} pass ${args.passNumber} was skipped after an error: ${message}`,
         findings: []
       },
-      skipped: true
+      skipped: true,
+      error: message
     };
   }
 }

@@ -32,6 +32,7 @@ async function run(): Promise<void> {
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
     const prNumber = pullRequest.number;
+    const authenticatedLogin = await getAuthenticatedLogin(octokit);
     console.log(
       `Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`
     );
@@ -141,6 +142,8 @@ async function run(): Promise<void> {
 
     if (review.result.score >= 5) {
       await addIssueReaction(octokit, owner, repo, prNumber, "+1");
+    } else {
+      await removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1", authenticatedLogin);
     }
     console.log(`Code Beat complete: score=${review.result.score}, inline-comments=${review.comments.length}`);
 
@@ -217,6 +220,37 @@ async function removeIssueReaction(
     });
   } catch (error) {
     console.warn(`::warning::Could not remove ${content} reaction from pull request: ${formatError(error)}`);
+  }
+}
+
+async function removeIssueReactionsByContent(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  content: "eyes" | "+1",
+  authenticatedLogin: string | undefined
+): Promise<void> {
+  if (!authenticatedLogin) {
+    return;
+  }
+
+  try {
+    const reactions = await octokit.paginate(octokit.rest.reactions.listForIssue, {
+      owner,
+      repo,
+      issue_number: issueNumber,
+      content,
+      per_page: 100
+    });
+
+    await Promise.all(
+      reactions
+        .filter((reaction) => reaction.user?.login === authenticatedLogin)
+        .map((reaction) => removeIssueReaction(octokit, owner, repo, issueNumber, reaction.id, content))
+    );
+  } catch (error) {
+    console.warn(`::warning::Could not list ${content} reactions for cleanup: ${formatError(error)}`);
   }
 }
 
@@ -335,6 +369,17 @@ async function fetchReviewThreads(
   } catch (error) {
     console.warn(`::warning::Could not fetch pull request review threads: ${formatError(error)}`);
     return [];
+  }
+}
+
+async function getAuthenticatedLogin(octokit: Octokit): Promise<string | undefined> {
+  try {
+    const response = await octokit.rest.users.getAuthenticated();
+    console.log(`Code Beat authenticated as ${response.data.login}`);
+    return response.data.login;
+  } catch (error) {
+    console.warn(`::warning::Could not determine authenticated GitHub user for reaction cleanup: ${formatError(error)}`);
+    return undefined;
   }
 }
 
