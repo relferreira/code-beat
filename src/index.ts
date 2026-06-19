@@ -4,6 +4,8 @@ import { formatInlineComment, formatReviewBody } from "./format.js";
 import { reviewPullRequest } from "./review.js";
 import type { PullRequestFile } from "./diff.js";
 
+type Octokit = ReturnType<typeof github.getOctokit>;
+
 async function run(): Promise<void> {
   try {
     const pullRequest = github.context.payload.pull_request;
@@ -27,6 +29,8 @@ async function run(): Promise<void> {
     const octokit = github.getOctokit(token);
     const { owner, repo } = github.context.repo;
     const prNumber = pullRequest.number;
+
+    await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
 
     const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
       owner,
@@ -111,6 +115,10 @@ async function run(): Promise<void> {
       });
     }
 
+    if (review.result.score >= 5) {
+      await addIssueReaction(octokit, owner, repo, prNumber, "+1");
+    }
+
     setOutput("score", String(review.result.score));
     setOutput("summary", review.result.summary);
     setOutput("inline-comments", String(review.comments.length));
@@ -141,6 +149,25 @@ function toPullRequestFile(file: {
   };
 }
 
+async function addIssueReaction(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  content: "eyes" | "+1"
+): Promise<void> {
+  try {
+    await octokit.rest.reactions.createForIssue({
+      owner,
+      repo,
+      issue_number: issueNumber,
+      content
+    });
+  } catch (error) {
+    console.warn(`::warning::Could not add ${content} reaction to pull request: ${formatError(error)}`);
+  }
+}
+
 function parseIntegerInput(name: string, fallback: number): number {
   const value = getInput(name);
   if (!value) {
@@ -167,6 +194,10 @@ function parseOptionalNumberInput(name: string): number | undefined {
   }
 
   return parsed;
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 void run();

@@ -74010,6 +74010,7 @@ async function run() {
         const octokit = getOctokit(token);
         const { owner, repo } = github_context.repo;
         const prNumber = pullRequest.number;
+        await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
         const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
             owner,
             repo,
@@ -74090,6 +74091,9 @@ async function run() {
                 body
             });
         }
+        if (review.result.score >= 5) {
+            await addIssueReaction(octokit, owner, repo, prNumber, "+1");
+        }
         setOutput("score", String(review.result.score));
         setOutput("summary", review.result.summary);
         setOutput("inline-comments", String(review.comments.length));
@@ -74110,6 +74114,19 @@ function toPullRequestFile(file) {
         changes: file.changes,
         patch: file.patch
     };
+}
+async function addIssueReaction(octokit, owner, repo, issueNumber, content) {
+    try {
+        await octokit.rest.reactions.createForIssue({
+            owner,
+            repo,
+            issue_number: issueNumber,
+            content
+        });
+    }
+    catch (error) {
+        console.warn(`::warning::Could not add ${content} reaction to pull request: ${lib_formatError(error)}`);
+    }
 }
 function parseIntegerInput(name, fallback) {
     const value = getInput(name);
@@ -74132,6 +74149,9 @@ function parseOptionalNumberInput(name) {
         throw new Error(`${name} must be a number between 0 and 5.`);
     }
     return parsed;
+}
+function lib_formatError(error) {
+    return error instanceof Error ? error.message : String(error);
 }
 void run();
 //# sourceMappingURL=index.js.map
