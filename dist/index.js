@@ -74221,6 +74221,10 @@ function clampScore(score) {
 async function run() {
     let cleanupProcessingReaction;
     let cleanupSuccessReaction;
+    let octokit;
+    let owner;
+    let repo;
+    let prNumber;
     try {
         const pullRequest = github_context.payload.pull_request;
         if (!pullRequest) {
@@ -74238,36 +74242,42 @@ async function run() {
         const reviewRuns = parseIntegerInput("review-runs", 2);
         const codeQualityRuns = parseIntegerInput("code-quality-runs", 2);
         const failOnScoreBelow = parseOptionalNumberInput("fail-on-score-below");
-        const octokit = getOctokit(token);
-        const { owner, repo } = github_context.repo;
-        const prNumber = pullRequest.number;
-        cleanupSuccessReaction = () => removeIssueReactionsByContent(octokit, owner, repo, prNumber, "+1");
-        console.log(`Code Beat start: ${owner}/${repo}#${prNumber}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
+        const client = getOctokit(token);
+        octokit = client;
+        const repoContext = github_context.repo;
+        const repoOwner = repoContext.owner;
+        const repoName = repoContext.repo;
+        const number = pullRequest.number;
+        owner = repoOwner;
+        repo = repoName;
+        prNumber = number;
+        cleanupSuccessReaction = () => removeIssueReactionsByContent(client, repoOwner, repoName, number, "+1");
+        console.log(`Code Beat start: ${repoOwner}/${repoName}#${number}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
         console.log(`Code Beat workspace: ${process.env.GITHUB_WORKSPACE ?? process.cwd()}`);
-        const processingReactionId = await addIssueReaction(octokit, owner, repo, prNumber, "eyes");
-        cleanupProcessingReaction = () => removeIssueReaction(octokit, owner, repo, prNumber, processingReactionId, "eyes");
+        const processingReactionId = await addIssueReaction(client, repoOwner, repoName, number, "eyes");
+        cleanupProcessingReaction = () => removeIssueReaction(client, repoOwner, repoName, number, processingReactionId, "eyes");
         const fetchStartedAt = Date.now();
         console.log("Code Beat GitHub context fetch start");
-        const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
-            owner,
-            repo,
-            pull_number: prNumber,
+        const files = await client.paginate(client.rest.pulls.listFiles, {
+            owner: repoOwner,
+            repo: repoName,
+            pull_number: number,
             per_page: 100
         });
         const [issueComments, reviewComments, reviewThreads] = await Promise.all([
-            octokit.paginate(octokit.rest.issues.listComments, {
-                owner,
-                repo,
-                issue_number: prNumber,
+            client.paginate(client.rest.issues.listComments, {
+                owner: repoOwner,
+                repo: repoName,
+                issue_number: number,
                 per_page: 100
             }),
-            octokit.paginate(octokit.rest.pulls.listReviewComments, {
-                owner,
-                repo,
-                pull_number: prNumber,
+            client.paginate(client.rest.pulls.listReviewComments, {
+                owner: repoOwner,
+                repo: repoName,
+                pull_number: number,
                 per_page: 100
             }),
-            fetchReviewThreads(octokit, owner, repo, prNumber)
+            fetchReviewThreads(client, repoOwner, repoName, number)
         ]);
         console.log(`Code Beat GitHub context fetch complete in ${Date.now() - fetchStartedAt}ms: ` +
             `${files.length} file(s), ${issueComments.length} issue comment(s), ${reviewComments.length} review comment(s), ` +
@@ -74279,9 +74289,9 @@ async function run() {
         const review = await reviewPullRequest({
             apiKey,
             model,
-            owner,
-            repo,
-            prNumber,
+            owner: repoOwner,
+            repo: repoName,
+            prNumber: number,
             title: pullRequest.title,
             body: pullRequest.body ?? "",
             author: pullRequest.user?.login ?? "unknown",
@@ -74317,10 +74327,10 @@ async function run() {
         });
         if (review.comments.length > 0) {
             console.log(`Code Beat posting PR review with ${review.comments.length} inline comment(s)`);
-            await octokit.rest.pulls.createReview({
-                owner,
-                repo,
-                pull_number: prNumber,
+            await client.rest.pulls.createReview({
+                owner: repoOwner,
+                repo: repoName,
+                pull_number: number,
                 event: "COMMENT",
                 body,
                 comments: review.comments.map((comment) => ({
@@ -74333,17 +74343,17 @@ async function run() {
         }
         else {
             console.log("Code Beat posting summary issue comment with no inline comments");
-            await octokit.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: prNumber,
+            await client.rest.issues.createComment({
+                owner: repoOwner,
+                repo: repoName,
+                issue_number: number,
                 body
             });
         }
         await cleanupProcessingReaction();
         cleanupProcessingReaction = undefined;
         if (review.result.score >= 5) {
-            await addIssueReaction(octokit, owner, repo, prNumber, "+1");
+            await addIssueReaction(client, repoOwner, repoName, number, "+1");
         }
         else {
             await cleanupSuccessReaction();
@@ -74357,9 +74367,13 @@ async function run() {
         }
     }
     catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
         await cleanupProcessingReaction?.();
+        if (octokit && owner && repo && prNumber) {
+            await upsertFailureComment(octokit, owner, repo, prNumber, message);
+        }
         await cleanupSuccessReaction?.();
-        setFailed(error instanceof Error ? error.message : String(error));
+        setFailed(message);
     }
 }
 function toPullRequestFile(file) {
@@ -74423,6 +74437,82 @@ async function removeIssueReactionsByContent(octokit, owner, repo, issueNumber, 
     catch (error) {
         console.warn(`::warning::Could not list ${content} reactions for cleanup: ${lib_formatError(error)}`);
     }
+}
+const FAILURE_COMMENT_MARKER = "<!-- code-beat-failure-comment -->";
+async function upsertFailureComment(octokit, owner, repo, issueNumber, errorMessage) {
+    const body = formatFailureComment(errorMessage);
+    try {
+        const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number: issueNumber,
+            per_page: 100
+        });
+        const previous = comments.find((comment) => isActionBotLogin(comment.user?.login ?? "") && comment.body?.includes(FAILURE_COMMENT_MARKER));
+        if (previous) {
+            await octokit.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: previous.id,
+                body
+            });
+            console.log(`Code Beat updated failure comment id=${previous.id}`);
+            return;
+        }
+        const response = await octokit.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: issueNumber,
+            body
+        });
+        console.log(`Code Beat posted failure comment id=${response.data.id}`);
+    }
+    catch (error) {
+        console.warn(`::warning::Could not post Code Beat failure comment: ${lib_formatError(error)}`);
+    }
+}
+function formatFailureComment(errorMessage) {
+    const runUrl = buildRunUrl();
+    const lines = [
+        FAILURE_COMMENT_MARKER,
+        "## 🥁 Code Beat could not finish",
+        "",
+        "I could not produce a trustworthy review for this run, so I did not post a score or inline comments.",
+        "",
+        `**Reason:** ${sanitizeErrorMessage(errorMessage)}`,
+        "",
+        "The workflow is marked failed so this does not get mistaken for a clean 5/5 review."
+    ];
+    if (runUrl) {
+        lines.push("", `🔎 **Logs:** ${runUrl}`);
+    }
+    lines.push("", "_Tiny drumsticks, honest failure mode._");
+    return lines.join("\n");
+}
+function buildRunUrl() {
+    const serverUrl = process.env.GITHUB_SERVER_URL;
+    const repository = process.env.GITHUB_REPOSITORY;
+    const runId = process.env.GITHUB_RUN_ID;
+    if (!serverUrl || !repository || !runId) {
+        return undefined;
+    }
+    return `${serverUrl}/${repository}/actions/runs/${runId}`;
+}
+function sanitizeErrorMessage(message) {
+    return truncateForComment(message
+        .replace(/sk-or-v1-[a-z0-9]+/gi, "[redacted-openrouter-key]")
+        .replace(/gh[pousr]_[A-Za-z0-9_]+/g, "[redacted-github-token]")
+        .replace(/\s+/g, " ")
+        .trim());
+}
+function truncateForComment(value) {
+    if (value.length <= 1500) {
+        return value || "Unknown error.";
+    }
+    return `${value.slice(0, 1499).trimEnd()}…`;
+}
+function isActionBotLogin(login) {
+    return login === "github-actions" || login === "github-actions[bot]";
 }
 async function fetchReviewThreads(octokit, owner, repo, prNumber) {
     const query = `query CodeBeatReviewThreads($owner: String!, $repo: String!, $number: Int!, $after: String) {
