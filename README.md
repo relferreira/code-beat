@@ -209,6 +209,15 @@ When using the default `${{ github.token }}`, GitHub shows comments as `github-a
 
 To use a custom name and avatar, pass a token from a GitHub App or dedicated bot account through `github-token`. GitHub controls the displayed author from the token identity; Code Beat can customize the comment body, but not the `github-actions` avatar/name produced by the default token.
 
+## Credits
+
+Code Beat's review prompts are adapted from Cursor's Thermos skills:
+
+- [`thermo-nuclear-review`](https://github.com/cursor/plugins/blob/main/thermos/skills/thermo-nuclear-review/SKILL.md)
+- [`thermo-nuclear-code-quality-review`](https://github.com/cursor/plugins/blob/main/thermos/skills/thermo-nuclear-code-quality-review/SKILL.md)
+
+Thermos is part of the official [`cursor/plugins`](https://github.com/cursor/plugins) repository and is distributed under the MIT License. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Development
 
 Install dependencies:
