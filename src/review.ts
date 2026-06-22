@@ -238,11 +238,6 @@ async function runWorkerAgent(args: {
       model: args.model,
       tools: args.tools,
       instructions: buildWorkerInstructions(args.category, args.passNumber),
-      output: aiOutput.object({
-        schema: looseAgentReviewOutputSchema,
-        name: "agent_review",
-        description: "A concise pull request review result with high-confidence findings."
-      }),
       temperature: 0.2,
       stopWhen: stepCountIs(8)
     });
@@ -257,7 +252,7 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
       `Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms, ` +
         `response chars=${result.text.length}`
     );
-    const output = normalizeAgentReviewResult(result.output, args.category);
+    const output = await structureWorkerOutput(args.category, args.passNumber, args.model, result.text);
     console.log(
       `Code Beat worker parsed: ${args.category} pass ${args.passNumber} produced ${output.findings.length} finding(s)`
     );
@@ -283,6 +278,40 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
       error: message
     };
   }
+}
+
+async function structureWorkerOutput(
+  category: ReviewCategory,
+  passNumber: number,
+  model: ReviewModel,
+  rawOutput: string
+): Promise<AgentReviewResult> {
+  const startedAt = Date.now();
+  console.log(`Code Beat worker structure start: ${category} pass ${passNumber}`);
+  const { output } = await generateText({
+    model,
+    output: aiOutput.object({
+      schema: looseAgentReviewOutputSchema,
+      name: "agent_review",
+      description: "A concise pull request review result with high-confidence findings."
+    }),
+    system: `Convert a Code Beat worker's raw review notes into the required structured review object.
+
+Do not invent findings. Preserve only findings that are clearly present in the raw notes.
+Drop weak, speculative, or non-actionable observations.
+Return an empty findings array when the worker found no actionable issues.`,
+    prompt: `Worker category: ${category}
+Worker pass: ${passNumber}
+
+Raw worker output:
+${rawOutput || "(empty)"}`,
+    temperature: 0
+  });
+  const parsedOutput = normalizeAgentReviewResult(output, category);
+  console.log(
+    `Code Beat worker structure complete: ${category} pass ${passNumber} in ${Date.now() - startedAt}ms with ${parsedOutput.findings.length} finding(s)`
+  );
+  return parsedOutput;
 }
 
 async function consolidateCategory(
