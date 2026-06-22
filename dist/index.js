@@ -73998,14 +73998,13 @@ ${JSON.stringify(results, null, 2)}`,
         return parsedOutput;
     }
     catch (error) {
-        console.warn(`::warning::Code Beat consolidation fallback: ${category} failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
-        return mergeAgentResults(category, results, `${category} consolidation was skipped after an error: ${review_formatError(error)}`);
+        throw new Error(`Code Beat ${category} consolidation failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
     }
 }
 async function consolidateFinalReview(args) {
-    const fallbackFindings = [...args.reviewConsolidation.findings, ...args.codeQualityConsolidation.findings];
+    const candidateFindings = [...args.reviewConsolidation.findings, ...args.codeQualityConsolidation.findings];
     const startedAt = Date.now();
-    console.log(`Code Beat final consolidation start with ${fallbackFindings.length} candidate finding(s)`);
+    console.log(`Code Beat final consolidation start with ${candidateFindings.length} candidate finding(s)`);
     try {
         const { output } = await generateText({
             model: args.model,
@@ -74044,8 +74043,7 @@ ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
         return parsedOutput;
     }
     catch (error) {
-        console.warn(`::warning::Code Beat final consolidation fallback after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
-        return buildFallbackReview(fallbackFindings, `Final consolidation was skipped after an error: ${review_formatError(error)}`);
+        throw new Error(`Code Beat final consolidation failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
     }
 }
 function buildWorkerInstructions(category, passNumber) {
@@ -74097,35 +74095,6 @@ Inline comment rules:
 
 Changed files:
 ${diff}`;
-}
-function parseJsonObject(text) {
-    const trimmed = text.trim();
-    try {
-        return JSON.parse(trimmed);
-    }
-    catch {
-        const fenced = /```(?:json)?\s*([\s\S]*?)\s*```/.exec(trimmed);
-        if (fenced?.[1]) {
-            return JSON.parse(fenced[1]);
-        }
-        const start = trimmed.indexOf("{");
-        const end = trimmed.lastIndexOf("}");
-        if (start !== -1 && end > start) {
-            return JSON.parse(trimmed.slice(start, end + 1));
-        }
-        throw new Error("Model response did not contain a valid JSON object.");
-    }
-}
-function parseAgentReviewResultText(text, category) {
-    return normalizeAgentReviewResult(parseJsonObject(text), category);
-}
-function parseReviewResultText(text, fallbackFindings) {
-    try {
-        return normalizeReviewResult(parseJsonObject(text));
-    }
-    catch {
-        return buildFallbackReview(fallbackFindings, "Final review response was not parseable.");
-    }
 }
 function normalizeAgentReviewResult(value, defaultCategory) {
     const input = asRecord(value);
@@ -74273,30 +74242,6 @@ function mergeAgentResults(category, results, summaryPrefix) {
         summary: truncate(`${summaryPrefix} Using ${findings.length} normalized finding(s) from valid ${category} outputs.`, 3000),
         findings
     });
-}
-function buildFallbackReview(fallbackFindings, reason) {
-    const findings = [];
-    const seen = new Set();
-    for (const finding of fallbackFindings) {
-        const normalized = normalizeFinding(finding);
-        if (!normalized) {
-            continue;
-        }
-        const key = `${normalized.path}:${normalized.line}:${normalized.title.toLowerCase()}`;
-        if (seen.has(key)) {
-            continue;
-        }
-        seen.add(key);
-        findings.push(normalized);
-    }
-    findings.sort((left, right) => severityRank(right.severity) - severityRank(left.severity));
-    return {
-        score: findings.length > 0 ? 2 : 5,
-        summary: findings.length > 0
-            ? `${reason} Posting normalized consolidated findings.`
-            : `${reason} Code Beat did not find usable review findings.`,
-        findings
-    };
 }
 function severityRank(severity) {
     if (severity === "blocker") {
