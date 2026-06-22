@@ -73955,8 +73955,7 @@ ${rawOutput || "(empty)"}`,
         return parsedOutput;
     }
     catch (error) {
-        console.warn(`::warning::Code Beat worker structure fallback: ${category} pass ${passNumber} failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
-        return parseAgentReviewResultText(rawOutput, category);
+        throw new Error(`Structured worker output failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
     }
 }
 async function consolidateCategory(category, results, input, model) {
@@ -73968,6 +73967,10 @@ async function consolidateCategory(category, results, input, model) {
             summary: `No valid ${category} reviewer outputs were available.`,
             findings: []
         };
+    }
+    if (results.length === 1) {
+        console.log(`Code Beat consolidation skipped: ${category} had a single valid output`);
+        return mergeAgentResults(category, results, `Using the single valid ${category} reviewer output.`);
     }
     try {
         const { output } = await generateText({
