@@ -74421,6 +74421,7 @@ async function run() {
                 body
             });
         }
+        await deleteFailureComment(client, repoOwner, repoName, number);
         await cleanupProcessingReaction();
         cleanupProcessingReaction = undefined;
         if (review.result.score >= 5) {
@@ -74540,6 +74541,29 @@ async function upsertFailureComment(octokit, owner, repo, issueNumber, errorMess
     }
     catch (error) {
         console.warn(`::warning::Could not post Code Beat failure comment: ${lib_formatError(error)}`);
+    }
+}
+async function deleteFailureComment(octokit, owner, repo, issueNumber) {
+    try {
+        const comments = await octokit.paginate(octokit.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number: issueNumber,
+            per_page: 100
+        });
+        const previous = comments.find((comment) => isActionBotLogin(comment.user?.login ?? "") && comment.body?.includes(FAILURE_COMMENT_MARKER));
+        if (!previous) {
+            return;
+        }
+        await octokit.rest.issues.deleteComment({
+            owner,
+            repo,
+            comment_id: previous.id
+        });
+        console.log(`Code Beat deleted stale failure comment id=${previous.id}`);
+    }
+    catch (error) {
+        console.warn(`::warning::Could not delete stale Code Beat failure comment: ${lib_formatError(error)}`);
     }
 }
 function formatFailureComment(errorMessage) {
