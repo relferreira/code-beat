@@ -10,7 +10,7 @@ inputs:
     required: false
     default: deepseek/deepseek-v4-flash
   review-runs:
-    description: Number of independent general PR review agents to run.
+    description: Number of independent thermo-nuclear PR review agents to run.
     required: false
     default: "2"
   code-quality-runs:

@@ -4,7 +4,9 @@
 
 Code Beat is a GitHub Action that reviews pull requests with OpenRouter, posts inline review comments, and publishes a score from 0 to 5.
 
-It runs multiple independent AI reviewer passes in parallel, then consolidates their findings into one final review. The default setup uses `deepseek/deepseek-v4-flash`, two general review passes, and two thermo-nuclear code-quality passes.
+It runs multiple independent AI reviewer passes in parallel, then consolidates their findings into one final review. The default setup uses `deepseek/deepseek-v4-flash`, two thermo-nuclear review passes, and two thermo-nuclear code-quality passes.
+
+The review agents are strict about correctness, regressions, security, privacy, developer-experience breakage, feature-gate leaks, and missing tests for risky behavior.
 
 The code-quality reviewers are intentionally strict about maintainability, structural simplification, file-size growth, spaghetti branching, abstraction boundaries, and type contracts.
 
@@ -37,7 +39,7 @@ jobs:
 That is enough for the default review pipeline:
 
 - model: `deepseek/deepseek-v4-flash`
-- general review agents: `2`
+- thermo-nuclear review agents: `2`
 - thermo-nuclear code-quality agents: `2`
 - max inline comments: `12`
 
@@ -93,7 +95,7 @@ The default pipeline starts four workers:
 
 | Worker type | Default count | Focus |
 | --- | ---: | --- |
-| General review | `2` | Correctness, regressions, edge cases, tests, security, privacy, performance, and confusing implementation choices. |
+| Review | `2` | Thermo-nuclear correctness review: regressions, edge cases, tests, security, privacy, developer-experience breakage, and feature-gate leaks. |
 | Code-quality review | `2` | Thermo-nuclear maintainability review: abstraction quality, code shape, giant files, condition growth, type contracts, and structural simplification. |
 
 Each worker runs independently. They all receive the same PR context and the same read-only tools, so disagreement is useful: the consolidator keeps the findings that survive multiple independent passes or are strongly grounded by one pass.
@@ -138,7 +140,7 @@ Code Beat is designed to keep useful review output even when one part of the pip
 - If one worker errors or returns invalid output, that worker is skipped.
 - If a category consolidator fails, Code Beat falls back to normalized findings from valid workers in that category.
 - If the final orchestrator fails, Code Beat falls back to normalized consolidated findings and a conservative score.
-- If no valid findings survive, Code Beat posts a clean review instead of failing the workflow.
+- If every AI worker fails, Code Beat posts or updates a PR-visible failure comment and fails the workflow instead of pretending the PR is clean.
 
 ## Scoring
 
@@ -161,7 +163,7 @@ Use `fail-on-score-below` if you want Code Beat to fail the check for low scores
 | --- | --- | --- | --- |
 | `openrouter-api-key` | yes | | OpenRouter API key used to call the configured model. |
 | `model` | no | `deepseek/deepseek-v4-flash` | OpenRouter model name. |
-| `review-runs` | no | `2` | Number of independent general PR reviewer agents to run. Values are capped at `5`. |
+| `review-runs` | no | `2` | Number of independent thermo-nuclear PR reviewer agents to run. Values are capped at `5`. |
 | `code-quality-runs` | no | `2` | Number of independent thermo-nuclear code-quality reviewer agents to run. Values are capped at `5`. |
 | `github-token` | no | `${{ github.token }}` | Token used to read PR files and create comments. |
 | `max-comments` | no | `12` | Maximum number of inline review comments to create. Set to `0` for summary-only reviews. The agents may find more, but only the top commentable findings are posted. |

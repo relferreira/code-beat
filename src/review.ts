@@ -1,6 +1,6 @@
 import { generateText, stepCountIs, ToolLoopAgent } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { SYSTEM_PROMPT } from "./prompt.js";
+import { THERMO_NUCLEAR_CODE_QUALITY_REVIEW_PROMPT, THERMO_NUCLEAR_REVIEW_PROMPT } from "./prompt.js";
 import { buildDiffContext, type PullRequestFile } from "./diff.js";
 import { collectRepoInstructions, createReviewTools } from "./repo-tools.js";
 import {
@@ -359,7 +359,7 @@ ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
 
 function buildWorkerInstructions(category: ReviewCategory, passNumber: number): string {
   if (category === "code-quality") {
-    return `${SYSTEM_PROMPT}
+    return `${THERMO_NUCLEAR_CODE_QUALITY_REVIEW_PROMPT}
 
 You are one of several independent Code Beat code-quality reviewer agents.
 This is pass ${passNumber}. Do not assume another pass will catch important issues.
@@ -367,15 +367,10 @@ Use the available tools to inspect local repository context, PR metadata, PR com
 Return only findings that are strongly grounded and actionable.`;
   }
 
-  return `You are one of several independent Code Beat pull request reviewer agents.
-This is pass ${passNumber}. Do not assume another pass will catch important issues.
+  return `${THERMO_NUCLEAR_REVIEW_PROMPT}
 
-Review like a serious senior engineer. Focus on:
-- correctness and behavioral regressions
-- missing tests for changed behavior
-- edge cases and error handling
-- security, privacy, or performance risks when visible
-- confusing implementation choices that would make maintenance risky
+You are one of several independent Code Beat pull request reviewer agents.
+This is pass ${passNumber}. Do not assume another pass will catch important issues.
 
 Use the available tools to inspect local repository context, PR metadata, PR comments, repository instructions, changed files, nearby code, and existing helpers when useful.
 Return only findings that are strongly grounded and actionable.`;
