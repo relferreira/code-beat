@@ -1,3 +1,5 @@
+![Code Beat banner](docs/code-beat-banner.png)
+
 # Code Beat
 
 Code Beat is a GitHub Action that reviews pull requests with OpenRouter, posts inline review comments, and publishes a score from 0 to 5.
