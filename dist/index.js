@@ -73762,7 +73762,6 @@ const reviewSchema = object({
 
 
 const MAX_AGENT_RUNS = 5;
-const STRUCTURED_OUTPUT_TIMEOUT_MS = 20_000;
 const looseFindingOutputSchema = object({
     path: schemas_string(),
     line: coerce_number(),
@@ -73932,7 +73931,6 @@ async function structureWorkerOutput(category, passNumber, model, rawOutput) {
     try {
         const { output } = await generateText({
             model,
-            timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
             output: output_exports.object({
                 schema: looseAgentReviewOutputSchema,
                 name: "agent_review",
@@ -73975,7 +73973,6 @@ async function consolidateCategory(category, results, input, model) {
     try {
         const { output } = await generateText({
             model,
-            timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
             output: output_exports.object({
                 schema: looseAgentReviewOutputSchema,
                 name: "category_consolidation",
@@ -74012,7 +74009,6 @@ async function consolidateFinalReview(args) {
     try {
         const { output } = await generateText({
             model: args.model,
-            timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
             output: output_exports.object({
                 schema: looseReviewOutputSchema,
                 name: "final_review",
