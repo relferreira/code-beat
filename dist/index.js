@@ -73762,6 +73762,7 @@ const reviewSchema = object({
 
 
 const MAX_AGENT_RUNS = 5;
+const STRUCTURED_OUTPUT_TIMEOUT_MS = 20_000;
 const looseFindingOutputSchema = object({
     path: schemas_string(),
     line: coerce_number(),
@@ -73928,28 +73929,35 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
 async function structureWorkerOutput(category, passNumber, model, rawOutput) {
     const startedAt = Date.now();
     console.log(`Code Beat worker structure start: ${category} pass ${passNumber}`);
-    const { output } = await generateText({
-        model,
-        output: output_exports.object({
-            schema: looseAgentReviewOutputSchema,
-            name: "agent_review",
-            description: "A concise pull request review result with high-confidence findings."
-        }),
-        system: `Convert a Code Beat worker's raw review notes into the required structured review object.
+    try {
+        const { output } = await generateText({
+            model,
+            timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
+            output: output_exports.object({
+                schema: looseAgentReviewOutputSchema,
+                name: "agent_review",
+                description: "A concise pull request review result with high-confidence findings."
+            }),
+            system: `Convert a Code Beat worker's raw review notes into the required structured review object.
 
 Do not invent findings. Preserve only findings that are clearly present in the raw notes.
 Drop weak, speculative, or non-actionable observations.
 Return an empty findings array when the worker found no actionable issues.`,
-        prompt: `Worker category: ${category}
+            prompt: `Worker category: ${category}
 Worker pass: ${passNumber}
 
 Raw worker output:
 ${rawOutput || "(empty)"}`,
-        temperature: 0
-    });
-    const parsedOutput = normalizeAgentReviewResult(output, category);
-    console.log(`Code Beat worker structure complete: ${category} pass ${passNumber} in ${Date.now() - startedAt}ms with ${parsedOutput.findings.length} finding(s)`);
-    return parsedOutput;
+            temperature: 0
+        });
+        const parsedOutput = normalizeAgentReviewResult(output, category);
+        console.log(`Code Beat worker structure complete: ${category} pass ${passNumber} in ${Date.now() - startedAt}ms with ${parsedOutput.findings.length} finding(s)`);
+        return parsedOutput;
+    }
+    catch (error) {
+        console.warn(`::warning::Code Beat worker structure fallback: ${category} pass ${passNumber} failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
+        return parseAgentReviewResultText(rawOutput, category);
+    }
 }
 async function consolidateCategory(category, results, input, model) {
     const startedAt = Date.now();
@@ -73964,6 +73972,7 @@ async function consolidateCategory(category, results, input, model) {
     try {
         const { output } = await generateText({
             model,
+            timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
             output: output_exports.object({
                 schema: looseAgentReviewOutputSchema,
                 name: "category_consolidation",
@@ -74000,6 +74009,7 @@ async function consolidateFinalReview(args) {
     try {
         const { output } = await generateText({
             model: args.model,
+            timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
             output: output_exports.object({
                 schema: looseReviewOutputSchema,
                 name: "final_review",
