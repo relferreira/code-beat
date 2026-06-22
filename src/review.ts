@@ -63,7 +63,6 @@ interface WorkerRunResult {
 }
 
 const MAX_AGENT_RUNS = 5;
-const STRUCTURED_OUTPUT_TIMEOUT_MS = 20_000;
 const looseFindingOutputSchema = z.object({
   path: z.string(),
   line: z.coerce.number(),
@@ -292,7 +291,6 @@ async function structureWorkerOutput(
   try {
     const { output } = await generateText({
       model,
-      timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
       output: aiOutput.object({
         schema: looseAgentReviewOutputSchema,
         name: "agent_review",
@@ -346,7 +344,6 @@ async function consolidateCategory(
   try {
     const { output } = await generateText({
       model,
-      timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
       output: aiOutput.object({
         schema: looseAgentReviewOutputSchema,
         name: "category_consolidation",
@@ -398,7 +395,6 @@ async function consolidateFinalReview(args: {
   try {
     const { output } = await generateText({
       model: args.model,
-      timeout: STRUCTURED_OUTPUT_TIMEOUT_MS,
       output: aiOutput.object({
         schema: looseReviewOutputSchema,
         name: "final_review",
