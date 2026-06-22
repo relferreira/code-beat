@@ -73763,6 +73763,7 @@ const reviewSchema = object({
 
 const MAX_AGENT_RUNS = 5;
 const MODEL_CALL_TIMEOUT_MS = 180_000;
+const MODEL_CALL_TIMEOUT = { totalMs: MODEL_CALL_TIMEOUT_MS };
 const looseFindingOutputSchema = object({
     path: schemas_string(),
     line: coerce_number(),
@@ -73898,7 +73899,7 @@ async function runWorkerAgent(args) {
             stopWhen: stepCountIs(8)
         });
         const result = await agent.generate({
-            timeout: MODEL_CALL_TIMEOUT_MS,
+            timeout: MODEL_CALL_TIMEOUT,
             prompt: `${args.basePrompt}
 
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
@@ -73933,7 +73934,7 @@ async function structureWorkerOutput(category, passNumber, model, rawOutput) {
     try {
         const { output } = await generateText({
             model,
-            timeout: MODEL_CALL_TIMEOUT_MS,
+            timeout: MODEL_CALL_TIMEOUT,
             output: output_exports.object({
                 schema: looseAgentReviewOutputSchema,
                 name: "agent_review",
@@ -73976,7 +73977,7 @@ async function consolidateCategory(category, results, input, model) {
     try {
         const { output } = await generateText({
             model,
-            timeout: MODEL_CALL_TIMEOUT_MS,
+            timeout: MODEL_CALL_TIMEOUT,
             output: output_exports.object({
                 schema: looseAgentReviewOutputSchema,
                 name: "category_consolidation",
@@ -74012,7 +74013,7 @@ async function consolidateFinalReview(args) {
     try {
         const { output } = await generateText({
             model: args.model,
-            timeout: MODEL_CALL_TIMEOUT_MS,
+            timeout: MODEL_CALL_TIMEOUT,
             output: output_exports.object({
                 schema: looseReviewOutputSchema,
                 name: "final_review",
