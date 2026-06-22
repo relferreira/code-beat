@@ -1,6 +1,5 @@
-import { generateText, Output as aiOutput, stepCountIs, ToolLoopAgent } from "ai";
+import { generateText, stepCountIs, ToolLoopAgent } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { z } from "zod";
 import { THERMO_NUCLEAR_CODE_QUALITY_REVIEW_PROMPT, THERMO_NUCLEAR_REVIEW_PROMPT } from "./prompt.js";
 import { buildDiffContext, type PullRequestFile } from "./diff.js";
 import { collectRepoInstructions, createReviewTools } from "./repo-tools.js";
@@ -63,30 +62,6 @@ interface WorkerRunResult {
 }
 
 const MAX_AGENT_RUNS = 5;
-const looseFindingOutputSchema = z.object({
-  path: z.string(),
-  line: z.coerce.number(),
-  severity: z.enum(["blocker", "major", "minor"]).optional(),
-  title: z.string(),
-  body: z.string()
-});
-const looseAgentReviewOutputSchema = z.object({
-  summary: z.string(),
-  findings: z
-    .array(
-      looseFindingOutputSchema.extend({
-        confidence: z.coerce.number().optional(),
-        evidence: z.string().optional(),
-        category: z.enum(["review", "code-quality"]).optional()
-      })
-    )
-    .default([])
-});
-const looseReviewOutputSchema = z.object({
-  score: z.coerce.number(),
-  summary: z.string(),
-  findings: z.array(looseFindingOutputSchema).default([])
-});
 
 export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedReview> {
   const openrouter = createOpenRouter({
@@ -238,11 +213,6 @@ async function runWorkerAgent(args: {
       model: args.model,
       tools: args.tools,
       instructions: buildWorkerInstructions(args.category, args.passNumber),
-      output: aiOutput.object({
-        schema: looseAgentReviewOutputSchema,
-        name: "agent_review",
-        description: "A concise pull request review result with high-confidence findings."
-      }),
       temperature: 0.2,
       stopWhen: stepCountIs(8)
     });
@@ -257,7 +227,7 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
       `Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms, ` +
         `response chars=${result.text.length}`
     );
-    const output = normalizeAgentReviewResult(result.output, args.category);
+    const output = parseAgentReviewResultText(result.text, args.category);
     console.log(
       `Code Beat worker parsed: ${args.category} pass ${args.passNumber} produced ${output.findings.length} finding(s)`
     );
@@ -302,13 +272,8 @@ async function consolidateCategory(
   }
 
   try {
-    const { output } = await generateText({
+    const { text } = await generateText({
       model,
-      output: aiOutput.object({
-        schema: looseAgentReviewOutputSchema,
-        name: "category_consolidation",
-        description: "A deduplicated category review result."
-      }),
       system: `You consolidate ${category} reviewer outputs for Code Beat.
 
 Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
@@ -325,11 +290,11 @@ ${JSON.stringify(results, null, 2)}`,
       temperature: 0
     });
 
-    const parsedOutput = normalizeAgentReviewResult(output, category);
+    const output = parseAgentReviewResultText(text, category);
     console.log(
-      `Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${parsedOutput.findings.length} finding(s)`
+      `Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${output.findings.length} finding(s)`
     );
-    return parsedOutput;
+    return output;
   } catch (error) {
     console.warn(
       `::warning::Code Beat consolidation fallback: ${category} failed after ${Date.now() - startedAt}ms: ${formatError(error)}`
@@ -353,13 +318,8 @@ async function consolidateFinalReview(args: {
   console.log(`Code Beat final consolidation start with ${fallbackFindings.length} candidate finding(s)`);
 
   try {
-    const { output } = await generateText({
+    const { text } = await generateText({
       model: args.model,
-      output: aiOutput.object({
-        schema: looseReviewOutputSchema,
-        name: "final_review",
-        description: "The final Code Beat pull request review with score and selected findings."
-      }),
       system: `You are the final Code Beat review orchestrator.
 
 Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
@@ -386,11 +346,11 @@ ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
       temperature: 0
     });
 
-    const parsedOutput = normalizeReviewResult(output);
+    const output = parseReviewResultText(text, fallbackFindings);
     console.log(
-      `Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${parsedOutput.score} and ${parsedOutput.findings.length} finding(s)`
+      `Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${output.score} and ${output.findings.length} finding(s)`
     );
-    return parsedOutput;
+    return output;
   } catch (error) {
     console.warn(`::warning::Code Beat final consolidation fallback after ${Date.now() - startedAt}ms: ${formatError(error)}`);
     return buildFallbackReview(fallbackFindings, `Final consolidation was skipped after an error: ${formatError(error)}`);

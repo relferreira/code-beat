@@ -49821,7 +49821,7 @@ function _coercedNumber(Class, params) {
         type: "number",
         coerce: true,
         checks: [],
-        ...normalizeParams(params),
+        ...util.normalizeParams(params),
     });
 }
 // @__NO_SIDE_EFFECTS__
@@ -73065,25 +73065,6 @@ var openrouter = createOpenRouter({
 });
 
 //# sourceMappingURL=index.mjs.map
-;// CONCATENATED MODULE: ./node_modules/zod/v4/classic/coerce.js
-
-
-function coerce_string(params) {
-    return core._coercedString(schemas.ZodString, params);
-}
-function coerce_number(params) {
-    return _coercedNumber(schemas_ZodNumber, params);
-}
-function coerce_boolean(params) {
-    return core._coercedBoolean(schemas.ZodBoolean, params);
-}
-function coerce_bigint(params) {
-    return core._coercedBigint(schemas.ZodBigInt, params);
-}
-function coerce_date(params) {
-    return core._coercedDate(schemas.ZodDate, params);
-}
-
 ;// CONCATENATED MODULE: ./lib/prompt.js
 const THERMO_NUCLEAR_REVIEW_PROMPT = String.raw `# Thermo-Nuclear Review
 
@@ -73760,29 +73741,7 @@ const reviewSchema = object({
 
 
 
-
 const MAX_AGENT_RUNS = 5;
-const looseFindingOutputSchema = object({
-    path: schemas_string(),
-    line: coerce_number(),
-    severity: schemas_enum(["blocker", "major", "minor"]).optional(),
-    title: schemas_string(),
-    body: schemas_string()
-});
-const looseAgentReviewOutputSchema = object({
-    summary: schemas_string(),
-    findings: array(looseFindingOutputSchema.extend({
-        confidence: coerce_number().optional(),
-        evidence: schemas_string().optional(),
-        category: schemas_enum(["review", "code-quality"]).optional()
-    }))
-        .default([])
-});
-const looseReviewOutputSchema = object({
-    score: coerce_number(),
-    summary: schemas_string(),
-    findings: array(looseFindingOutputSchema).default([])
-});
 async function reviewPullRequest(input) {
     const openrouter = createOpenRouter({
         apiKey: input.apiKey
@@ -73893,11 +73852,6 @@ async function runWorkerAgent(args) {
             model: args.model,
             tools: args.tools,
             instructions: buildWorkerInstructions(args.category, args.passNumber),
-            output: output_exports.object({
-                schema: looseAgentReviewOutputSchema,
-                name: "agent_review",
-                description: "A concise pull request review result with high-confidence findings."
-            }),
             temperature: 0.2,
             stopWhen: stepCountIs(8)
         });
@@ -73908,7 +73862,7 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
         });
         console.log(`Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms, ` +
             `response chars=${result.text.length}`);
-        const output = normalizeAgentReviewResult(result.output, args.category);
+        const output = parseAgentReviewResultText(result.text, args.category);
         console.log(`Code Beat worker parsed: ${args.category} pass ${args.passNumber} produced ${output.findings.length} finding(s)`);
         return {
             category: args.category,
@@ -73941,13 +73895,8 @@ async function consolidateCategory(category, results, input, model) {
         };
     }
     try {
-        const { output } = await generateText({
+        const { text } = await generateText({
             model,
-            output: output_exports.object({
-                schema: looseAgentReviewOutputSchema,
-                name: "category_consolidation",
-                description: "A deduplicated category review result."
-            }),
             system: `You consolidate ${category} reviewer outputs for Code Beat.
 
 Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
@@ -73963,9 +73912,9 @@ Reviewer outputs:
 ${JSON.stringify(results, null, 2)}`,
             temperature: 0
         });
-        const parsedOutput = normalizeAgentReviewResult(output, category);
-        console.log(`Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${parsedOutput.findings.length} finding(s)`);
-        return parsedOutput;
+        const output = parseAgentReviewResultText(text, category);
+        console.log(`Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${output.findings.length} finding(s)`);
+        return output;
     }
     catch (error) {
         console.warn(`::warning::Code Beat consolidation fallback: ${category} failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
@@ -73977,13 +73926,8 @@ async function consolidateFinalReview(args) {
     const startedAt = Date.now();
     console.log(`Code Beat final consolidation start with ${fallbackFindings.length} candidate finding(s)`);
     try {
-        const { output } = await generateText({
+        const { text } = await generateText({
             model: args.model,
-            output: output_exports.object({
-                schema: looseReviewOutputSchema,
-                name: "final_review",
-                description: "The final Code Beat pull request review with score and selected findings."
-            }),
             system: `You are the final Code Beat review orchestrator.
 
 Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
@@ -74009,9 +73953,9 @@ Code-quality consolidation:
 ${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
             temperature: 0
         });
-        const parsedOutput = normalizeReviewResult(output);
-        console.log(`Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${parsedOutput.score} and ${parsedOutput.findings.length} finding(s)`);
-        return parsedOutput;
+        const output = parseReviewResultText(text, fallbackFindings);
+        console.log(`Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${output.score} and ${output.findings.length} finding(s)`);
+        return output;
     }
     catch (error) {
         console.warn(`::warning::Code Beat final consolidation fallback after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
