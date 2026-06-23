@@ -160,8 +160,8 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   const codeQualityResults = workerResults.filter((result) => result.category === "code-quality" && !result.skipped);
 
   const [reviewConsolidation, codeQualityConsolidation] = await Promise.all([
-    consolidateCategory("review", reviewResults.map((result) => result.output), input, model),
-    consolidateCategory("code-quality", codeQualityResults.map((result) => result.output), input, model)
+    consolidateCategory("review", reviewResults.map((result) => result.output)),
+    consolidateCategory("code-quality", codeQualityResults.map((result) => result.output))
   ]);
 
   const finalResult = await consolidateFinalReview({
@@ -290,9 +290,7 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
 
 async function consolidateCategory(
   category: ReviewCategory,
-  results: AgentReviewResult[],
-  input: ReviewInput,
-  model: ReviewModel
+  results: AgentReviewResult[]
 ): Promise<AgentReviewResult> {
   const startedAt = Date.now();
   console.log(`Code Beat consolidation start: ${category} with ${results.length} result(s)`);
@@ -309,41 +307,11 @@ async function consolidateCategory(
     return mergeAgentResults(category, results, `Using the single valid ${category} reviewer output.`);
   }
 
-  try {
-    const { output } = await generateText({
-      model,
-      timeout: MODEL_CALL_TIMEOUT,
-      output: aiOutput.object({
-        schema: looseAgentReviewOutputSchema,
-        name: "category_consolidation",
-        description: "A deduplicated category review result."
-      }),
-      system: `You consolidate ${category} reviewer outputs for Code Beat.
-
-Drop duplicate, weak, speculative, unactionable, or poorly grounded findings.
-Preserve only findings that are useful as pull request review feedback.
-Keep exact file paths and added-line numbers when present.
-Return a concise summary and a ranked findings list.
-Return JSON only, with shape:
-{"summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string, "confidence": number, "evidence": string, "category": "review"|"code-quality"}]}`,
-      prompt: `Pull request: ${input.owner}/${input.repo}#${input.prNumber}
-Title: ${input.title}
-
-Reviewer outputs:
-${JSON.stringify(results, null, 2)}`,
-      temperature: 0
-    });
-
-    const parsedOutput = normalizeAgentReviewResult(output, category);
-    console.log(
-      `Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${parsedOutput.findings.length} finding(s)`
-    );
-    return parsedOutput;
-  } catch (error) {
-    throw new Error(
-      `Code Beat ${category} consolidation failed after ${Date.now() - startedAt}ms: ${formatError(error)}`
-    );
-  }
+  const mergedOutput = mergeAgentResults(category, results, `Merged ${results.length} valid ${category} reviewer outputs.`);
+  console.log(
+    `Code Beat consolidation complete: ${category} in ${Date.now() - startedAt}ms with ${mergedOutput.findings.length} finding(s)`
+  );
+  return mergedOutput;
 }
 
 async function consolidateFinalReview(args: {
