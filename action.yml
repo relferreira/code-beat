@@ -21,6 +21,18 @@ inputs:
     description: Optional list of OpenRouter model names for code-quality agents. Overrides models for the code-quality flow.
     required: false
     default: ""
+  retry-max-attempts:
+    description: Maximum attempts for the same assigned model on transient provider errors such as 429, 503, or 529.
+    required: false
+    default: "3"
+  retry-delay-ms:
+    description: Initial delay in milliseconds before retrying the same assigned model.
+    required: false
+    default: "1000"
+  retry-backoff-factor:
+    description: Exponential backoff multiplier for same-model retries.
+    required: false
+    default: "2"
   review-runs:
     description: Number of independent thermo-nuclear PR review agents to run.
     required: false

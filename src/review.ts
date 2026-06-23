@@ -1,5 +1,6 @@
-import { Output as aiOutput, stepCountIs, ToolLoopAgent } from "ai";
+import { Output as aiOutput, stepCountIs, ToolLoopAgent, type LanguageModel } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createRetryableModel, error, httpStatus } from "ai-retry/language-model";
 import { z } from "zod";
 import { THERMO_NUCLEAR_CODE_QUALITY_REVIEW_PROMPT, THERMO_NUCLEAR_REVIEW_PROMPT } from "./prompt.js";
 import { buildDiffContext, type PullRequestFile } from "./diff.js";
@@ -30,6 +31,7 @@ export interface ReviewInput {
   model: string;
   reviewModels: string[];
   codeQualityModels: string[];
+  retryPolicy: RetryPolicy;
   owner: string;
   repo: string;
   prNumber: number;
@@ -54,7 +56,14 @@ export interface ValidatedReview {
 }
 
 type ReviewCategory = "review" | "code-quality";
-type ReviewModel = ReturnType<ReturnType<typeof createOpenRouter>["chat"]>;
+type OpenRouterProvider = ReturnType<typeof createOpenRouter>;
+type ReviewModel = LanguageModel;
+
+export interface RetryPolicy {
+  maxAttempts: number;
+  delayMs: number;
+  backoffFactor: number;
+}
 
 interface WorkerRunResult {
   category: ReviewCategory;
@@ -127,7 +136,7 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
         category: "review",
         passNumber: index + 1,
         modelName: reviewModelNames[index] ?? input.model,
-        model: openrouter.chat(reviewModelNames[index] ?? input.model),
+        model: createReviewModel(openrouter, reviewModelNames[index] ?? input.model, input.retryPolicy, `review pass ${index + 1}`),
         tools,
         basePrompt
       })
@@ -137,7 +146,12 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
         category: "code-quality",
         passNumber: index + 1,
         modelName: codeQualityModelNames[index] ?? input.model,
-        model: openrouter.chat(codeQualityModelNames[index] ?? input.model),
+        model: createReviewModel(
+          openrouter,
+          codeQualityModelNames[index] ?? input.model,
+          input.retryPolicy,
+          `code-quality pass ${index + 1}`
+        ),
         tools,
         basePrompt
       })
@@ -248,6 +262,7 @@ async function runWorkerAgent(args: {
         description: "A concise pull request review result with high-confidence findings."
       }),
       temperature: 0.2,
+      maxRetries: 0,
       stopWhen: stepCountIs(8)
     });
 
@@ -288,6 +303,56 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
       error: message
     };
   }
+}
+
+function createReviewModel(
+  openrouter: OpenRouterProvider,
+  modelName: string,
+  retryPolicy: RetryPolicy,
+  workerLabel: string
+): ReviewModel {
+  const baseModel = openrouter.chat(modelName);
+  if (retryPolicy.maxAttempts < 2) {
+    console.log(`Code Beat retry disabled: ${workerLabel}, model=${modelName}`);
+    return baseModel;
+  }
+
+  console.log(
+    `Code Beat retry policy: ${workerLabel}, model=${modelName}, max-attempts=${retryPolicy.maxAttempts}, ` +
+      `delay-ms=${retryPolicy.delayMs}, backoff-factor=${retryPolicy.backoffFactor}`
+  );
+
+  const retryOptions = {
+    maxAttempts: retryPolicy.maxAttempts,
+    delay: retryPolicy.delayMs,
+    backoffFactor: retryPolicy.backoffFactor
+  };
+
+  return createRetryableModel({
+    model: baseModel,
+    retries: [
+      httpStatus(429, 500, 502, 503, 504, 529).retry(retryOptions),
+      error.isRetryable(true).retry(retryOptions)
+    ],
+    onError: (context) => {
+      console.warn(
+        `::warning::Code Beat model attempt failed: ${workerLabel}, model=${formatRetryModel(context.current.model)}, ` +
+          `attempt=${context.attempts.length}/${retryPolicy.maxAttempts}, error=${formatError(context.current.error)}`
+      );
+    },
+    onRetry: (context) => {
+      console.warn(
+        `::warning::Code Beat model retry scheduled: ${workerLabel}, model=${formatRetryModel(context.current.model)}, ` +
+          `next-attempt=${context.attempts.length + 1}/${retryPolicy.maxAttempts}`
+      );
+    },
+    onFailure: (context) => {
+      console.warn(
+        `::warning::Code Beat model retries exhausted: ${workerLabel}, model=${formatRetryModel(context.current.model)}, ` +
+          `attempts=${context.attempts.length}, error=${formatError(context.error)}`
+      );
+    }
+  });
 }
 
 async function consolidateCategory(
@@ -643,6 +708,17 @@ function formatError(error: unknown): string {
   }
 
   return String(error);
+}
+
+function formatRetryModel(model: unknown): string {
+  if (typeof model === "string") {
+    return model;
+  }
+
+  const input = asRecord(model);
+  const provider = String(input.provider ?? "unknown-provider");
+  const modelId = String(input.modelId ?? "unknown-model");
+  return `${provider}/${modelId}`;
 }
 
 function normalizeFinding(value: unknown): ReviewFinding | undefined {

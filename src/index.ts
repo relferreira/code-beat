@@ -28,6 +28,9 @@ async function run(): Promise<void> {
     const sharedModels = parseModelListInput("models");
     const reviewModels = parseModelListInput("review-models");
     const codeQualityModels = parseModelListInput("code-quality-models");
+    const retryMaxAttempts = parseIntegerInput("retry-max-attempts", 3);
+    const retryDelayMs = parseIntegerInput("retry-delay-ms", 1000);
+    const retryBackoffFactor = parseOptionalPositiveNumberInput("retry-backoff-factor", 2);
     const token = getInput("github-token") || process.env.GITHUB_TOKEN;
     if (!token) {
       setFailed("A GitHub token is required. Pass github-token or set GITHUB_TOKEN.");
@@ -52,7 +55,8 @@ async function run(): Promise<void> {
       `Code Beat start: ${repoOwner}/${repoName}#${number}, model=${model}, ` +
         `models=${formatModelList(sharedModels)}, review-models=${formatModelList(reviewModels)}, ` +
         `code-quality-models=${formatModelList(codeQualityModels)}, review-runs=${reviewRuns}, ` +
-        `code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`
+        `code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}, retry-max-attempts=${retryMaxAttempts}, ` +
+        `retry-delay-ms=${retryDelayMs}, retry-backoff-factor=${retryBackoffFactor}`
     );
     console.log(`Code Beat workspace: ${process.env.GITHUB_WORKSPACE ?? process.cwd()}`);
 
@@ -97,6 +101,11 @@ async function run(): Promise<void> {
       model,
       reviewModels: reviewModels.length > 0 ? reviewModels : sharedModels,
       codeQualityModels: codeQualityModels.length > 0 ? codeQualityModels : sharedModels,
+      retryPolicy: {
+        maxAttempts: retryMaxAttempts,
+        delayMs: retryDelayMs,
+        backoffFactor: retryBackoffFactor
+      },
       owner: repoOwner,
       repo: repoName,
       prNumber: number,
@@ -717,6 +726,20 @@ function parseOptionalNumberInput(name: string): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 5) {
     throw new Error(`${name} must be a number between 0 and 5.`);
+  }
+
+  return parsed;
+}
+
+function parseOptionalPositiveNumberInput(name: string, fallback: number): number {
+  const value = getInput(name);
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative number.`);
   }
 
   return parsed;

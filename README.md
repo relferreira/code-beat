@@ -166,6 +166,9 @@ Use `fail-on-score-below` if you want Code Beat to fail the check for low scores
 | `models` | no | | Optional shared list of OpenRouter model names for both review and code-quality agents. Accepts newline, comma, or JSON-array syntax. Cycles when there are more runs than models. |
 | `review-models` | no | | Optional list of OpenRouter model names for review agents. Overrides `models` for the review flow. |
 | `code-quality-models` | no | | Optional list of OpenRouter model names for code-quality agents. Overrides `models` for the code-quality flow. |
+| `retry-max-attempts` | no | `3` | Maximum attempts for the same assigned model on transient provider errors such as rate limits or overloaded responses. Set to `1` to disable retry wrapping. |
+| `retry-delay-ms` | no | `1000` | Initial delay in milliseconds before retrying the same assigned model. `Retry-After` provider headers are honored when present. |
+| `retry-backoff-factor` | no | `2` | Exponential backoff multiplier for same-model retries. |
 | `review-runs` | no | `2` | Number of independent thermo-nuclear PR reviewer agents to run. Values are capped at `5`. |
 | `code-quality-runs` | no | `2` | Number of independent thermo-nuclear code-quality reviewer agents to run. Values are capped at `5`. |
 | `github-token` | no | `${{ github.token }}` | Token used to read PR files and create comments. |
@@ -199,6 +202,8 @@ Example with model diversity:
       deepseek/deepseek-v4-flash
       anthropic/claude-sonnet-4
 ```
+
+Code Beat does not silently switch models during retry. Retries use the same model assigned to that worker pass and only target transient/resource failures such as `429`, `500`, `502`, `503`, `504`, `529`, or AI SDK retryable API errors.
 
 ## Outputs
 
