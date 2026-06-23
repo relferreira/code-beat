@@ -73780,11 +73780,6 @@ const looseAgentReviewOutputSchema = object({
     }))
         .default([])
 });
-const looseReviewOutputSchema = object({
-    score: coerce_number(),
-    summary: schemas_string(),
-    findings: array(looseFindingOutputSchema).default([])
-});
 async function reviewPullRequest(input) {
     const openrouter = createOpenRouter({
         apiKey: input.apiKey
@@ -73846,9 +73841,7 @@ async function reviewPullRequest(input) {
     ]);
     const finalResult = await consolidateFinalReview({
         reviewConsolidation,
-        codeQualityConsolidation,
-        input,
-        model
+        codeQualityConsolidation
     });
     const resultWithThreadFeedback = applyReviewThreadFeedback(finalResult, input.comments.reviewThreads);
     const suppressedFindingCount = finalResult.findings.length - resultWithThreadFeedback.findings.length;
@@ -73955,47 +73948,9 @@ async function consolidateFinalReview(args) {
     const candidateFindings = [...args.reviewConsolidation.findings, ...args.codeQualityConsolidation.findings];
     const startedAt = Date.now();
     console.log(`Code Beat final consolidation start with ${candidateFindings.length} candidate finding(s)`);
-    try {
-        const { output } = await generateText({
-            model: args.model,
-            timeout: MODEL_CALL_TIMEOUT,
-            output: output_exports.object({
-                schema: looseReviewOutputSchema,
-                name: "final_review",
-                description: "The final Code Beat pull request review with score and selected findings."
-            }),
-            system: `You are the final Code Beat review orchestrator.
-
-Merge normal review findings and thermo-nuclear code-quality findings into one pull request review.
-Remove overlap across categories.
-Prefer high-confidence, actionable, non-nit findings.
-Keep inline comments focused and direct.
-Score from 0 to 5:
-- 0: severe correctness or structural failure
-- 1: major issues that should block merge
-- 2: significant concerns
-- 3: acceptable with notable improvements
-- 4: good with minor concerns
-- 5: no clear concerns
-Return JSON only, with shape:
-{"score": number, "summary": string, "findings": [{"path": string, "line": number, "severity": "blocker"|"major"|"minor", "title": string, "body": string}]}`,
-            prompt: `Pull request: ${args.input.owner}/${args.input.repo}#${args.input.prNumber}
-Title: ${args.input.title}
-
-Review consolidation:
-${JSON.stringify(args.reviewConsolidation, null, 2)}
-
-Code-quality consolidation:
-${JSON.stringify(args.codeQualityConsolidation, null, 2)}`,
-            temperature: 0
-        });
-        const parsedOutput = normalizeReviewResult(output);
-        console.log(`Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${parsedOutput.score} and ${parsedOutput.findings.length} finding(s)`);
-        return parsedOutput;
-    }
-    catch (error) {
-        throw new Error(`Code Beat final consolidation failed after ${Date.now() - startedAt}ms: ${review_formatError(error)}`);
-    }
+    const finalResult = buildDeterministicReview(candidateFindings);
+    console.log(`Code Beat final consolidation complete in ${Date.now() - startedAt}ms with score ${finalResult.score} and ${finalResult.findings.length} finding(s)`);
+    return finalResult;
 }
 function buildWorkerInstructions(category, passNumber) {
     if (category === "code-quality") {
@@ -74055,15 +74010,6 @@ function normalizeAgentReviewResult(value, defaultCategory) {
         findings: findings
             .map((finding) => normalizeAgentFinding(finding, defaultCategory))
             .filter((finding) => finding !== undefined)
-    });
-}
-function normalizeReviewResult(value) {
-    const input = asRecord(value);
-    const findings = Array.isArray(input.findings) ? input.findings : [];
-    return reviewSchema.parse({
-        score: clampScore(Number(input.score ?? 0)),
-        summary: truncate(String(input.summary ?? "No summary provided."), 4000),
-        findings: findings.map((finding) => normalizeFinding(finding)).filter((finding) => finding !== undefined)
     });
 }
 function normalizeAgentFinding(value, defaultCategory) {
@@ -74193,6 +74139,55 @@ function mergeAgentResults(category, results, summaryPrefix) {
         summary: truncate(`${summaryPrefix} Using ${findings.length} normalized finding(s) from valid ${category} outputs.`, 3000),
         findings
     });
+}
+function buildDeterministicReview(candidateFindings) {
+    const findings = [];
+    const seen = new Set();
+    for (const finding of candidateFindings) {
+        const normalized = normalizeFinding(finding);
+        if (!normalized) {
+            continue;
+        }
+        const key = `${normalized.path}:${normalized.line}:${normalizeTitle(normalized.title)}`;
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        findings.push(normalized);
+    }
+    findings.sort((left, right) => severityRank(right.severity) - severityRank(left.severity));
+    const score = scoreFindings(findings);
+    return {
+        score,
+        summary: summarizeFindings(findings, score),
+        findings
+    };
+}
+function scoreFindings(findings) {
+    if (findings.length === 0) {
+        return 5;
+    }
+    if (findings.some((finding) => finding.severity === "blocker")) {
+        return 1;
+    }
+    if (findings.some((finding) => finding.severity === "major")) {
+        return 2;
+    }
+    return 4;
+}
+function summarizeFindings(findings, score) {
+    if (findings.length === 0) {
+        return "Code Beat did not find clear actionable issues in this pull request.";
+    }
+    const blockerCount = findings.filter((finding) => finding.severity === "blocker").length;
+    const majorCount = findings.filter((finding) => finding.severity === "major").length;
+    const minorCount = findings.filter((finding) => finding.severity === "minor").length;
+    const parts = [
+        blockerCount > 0 ? `${blockerCount} blocker` : "",
+        majorCount > 0 ? `${majorCount} major` : "",
+        minorCount > 0 ? `${minorCount} minor` : ""
+    ].filter(Boolean);
+    return `Code Beat found ${findings.length} actionable finding(s): ${parts.join(", ")}. Score ${score}/5 reflects the highest-severity issue raised by the reviewer agents.`;
 }
 function severityRank(severity) {
     if (severity === "blocker") {
