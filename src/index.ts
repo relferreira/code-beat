@@ -1,6 +1,7 @@
 import * as github from "@actions/github";
 import { getInput, setFailed, setOutput } from "./action-core.js";
 import { formatInlineComment, formatReviewBody } from "./format.js";
+import { parseModelListValue } from "./model-list.js";
 import { reviewPullRequest } from "./review.js";
 import type { PullRequestFile } from "./diff.js";
 import type { PullRequestReviewThreadContext } from "./review.js";
@@ -24,6 +25,9 @@ async function run(): Promise<void> {
 
     const apiKey = getInput("openrouter-api-key", { required: true });
     const model = getInput("model") || "deepseek/deepseek-v4-flash";
+    const sharedModels = parseModelListInput("models");
+    const reviewModels = parseModelListInput("review-models");
+    const codeQualityModels = parseModelListInput("code-quality-models");
     const token = getInput("github-token") || process.env.GITHUB_TOKEN;
     if (!token) {
       setFailed("A GitHub token is required. Pass github-token or set GITHUB_TOKEN.");
@@ -45,7 +49,10 @@ async function run(): Promise<void> {
     prNumber = number;
     cleanupSuccessReaction = () => removeIssueReactionsByContent(client, repoOwner, repoName, number, "+1");
     console.log(
-      `Code Beat start: ${repoOwner}/${repoName}#${number}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`
+      `Code Beat start: ${repoOwner}/${repoName}#${number}, model=${model}, ` +
+        `models=${formatModelList(sharedModels)}, review-models=${formatModelList(reviewModels)}, ` +
+        `code-quality-models=${formatModelList(codeQualityModels)}, review-runs=${reviewRuns}, ` +
+        `code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`
     );
     console.log(`Code Beat workspace: ${process.env.GITHUB_WORKSPACE ?? process.cwd()}`);
 
@@ -88,6 +95,8 @@ async function run(): Promise<void> {
     const review = await reviewPullRequest({
       apiKey,
       model,
+      reviewModels: reviewModels.length > 0 ? reviewModels : sharedModels,
+      codeQualityModels: codeQualityModels.length > 0 ? codeQualityModels : sharedModels,
       owner: repoOwner,
       repo: repoName,
       prNumber: number,
@@ -711,6 +720,14 @@ function parseOptionalNumberInput(name: string): number | undefined {
   }
 
   return parsed;
+}
+
+function parseModelListInput(name: string): string[] {
+  return parseModelListValue(getInput(name));
+}
+
+function formatModelList(models: string[]): string {
+  return models.length > 0 ? models.join(",") : "(default)";
 }
 
 function formatError(error: unknown): string {

@@ -9,6 +9,18 @@ inputs:
     description: OpenRouter model name, for example anthropic/claude-sonnet-4 or openai/gpt-4.1.
     required: false
     default: deepseek/deepseek-v4-flash
+  models:
+    description: Optional list of OpenRouter model names shared by both review and code-quality agents. Accepts newline, comma, or JSON-array syntax.
+    required: false
+    default: ""
+  review-models:
+    description: Optional list of OpenRouter model names for review agents. Overrides models for the review flow.
+    required: false
+    default: ""
+  code-quality-models:
+    description: Optional list of OpenRouter model names for code-quality agents. Overrides models for the code-quality flow.
+    required: false
+    default: ""
   review-runs:
     description: Number of independent thermo-nuclear PR review agents to run.
     required: false

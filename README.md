@@ -163,6 +163,9 @@ Use `fail-on-score-below` if you want Code Beat to fail the check for low scores
 | --- | --- | --- | --- |
 | `openrouter-api-key` | yes | | OpenRouter API key used to call the configured model. |
 | `model` | no | `deepseek/deepseek-v4-flash` | OpenRouter model name. |
+| `models` | no | | Optional shared list of OpenRouter model names for both review and code-quality agents. Accepts newline, comma, or JSON-array syntax. Cycles when there are more runs than models. |
+| `review-models` | no | | Optional list of OpenRouter model names for review agents. Overrides `models` for the review flow. |
+| `code-quality-models` | no | | Optional list of OpenRouter model names for code-quality agents. Overrides `models` for the code-quality flow. |
 | `review-runs` | no | `2` | Number of independent thermo-nuclear PR reviewer agents to run. Values are capped at `5`. |
 | `code-quality-runs` | no | `2` | Number of independent thermo-nuclear code-quality reviewer agents to run. Values are capped at `5`. |
 | `github-token` | no | `${{ github.token }}` | Token used to read PR files and create comments. |
@@ -180,6 +183,21 @@ Example with custom tuning:
     code-quality-runs: 2
     max-comments: 8
     fail-on-score-below: 2
+```
+
+Example with model diversity:
+
+```yaml
+- uses: relferreira/code-beat@main
+  with:
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    model: deepseek/deepseek-v4-flash
+    review-models: |
+      deepseek/deepseek-v4-flash
+      moonshotai/kimi-k2.6
+    code-quality-models: |
+      deepseek/deepseek-v4-flash
+      anthropic/claude-sonnet-4
 ```
 
 ## Outputs

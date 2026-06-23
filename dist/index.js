@@ -36693,6 +36693,38 @@ function severityEmoji(severity) {
     return "💡";
 }
 //# sourceMappingURL=format.js.map
+;// CONCATENATED MODULE: ./lib/model-list.js
+function parseModelListValue(value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return [];
+    }
+    const parsedJson = parseJsonStringArray(trimmed);
+    if (parsedJson) {
+        return parsedJson;
+    }
+    const withoutBrackets = trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed;
+    return withoutBrackets
+        .split(/\r?\n|,/)
+        .map((item) => item.trim().replace(/^-\s*/, "").replace(/^['"]|['"]$/g, "").trim())
+        .filter(Boolean);
+}
+function parseJsonStringArray(value) {
+    if (!value.startsWith("[")) {
+        return undefined;
+    }
+    try {
+        const parsed = JSON.parse(value);
+        if (!Array.isArray(parsed)) {
+            return undefined;
+        }
+        return parsed.filter((item) => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+    }
+    catch {
+        return undefined;
+    }
+}
+//# sourceMappingURL=model-list.js.map
 ;// CONCATENATED MODULE: ./node_modules/@ai-sdk/provider/dist/index.mjs
 // src/errors/ai-sdk-error.ts
 var marker = "vercel.ai.error";
@@ -73784,7 +73816,6 @@ async function reviewPullRequest(input) {
     const openrouter = createOpenRouter({
         apiKey: input.apiKey
     });
-    const model = openrouter.chat(input.model);
     const diffContext = buildDiffContext(input.files);
     const repoInstructions = collectRepoInstructions(input.workspaceRoot);
     const basePrompt = buildReviewPrompt(input, diffContext.prompt, diffContext.truncated, repoInstructions);
@@ -73806,18 +73837,24 @@ async function reviewPullRequest(input) {
     });
     const reviewRunCount = clampRunCount(input.reviewRuns);
     const codeQualityRunCount = clampRunCount(input.codeQualityRuns);
+    const reviewModelNames = resolveModelNames(input.model, input.reviewModels, reviewRunCount);
+    const codeQualityModelNames = resolveModelNames(input.model, input.codeQualityModels, codeQualityRunCount);
+    console.log(`Code Beat model plan: review=${formatModelAssignments(reviewModelNames)}, ` +
+        `code-quality=${formatModelAssignments(codeQualityModelNames)}`);
     const workerRuns = [
         ...Array.from({ length: reviewRunCount }, (_, index) => runWorkerAgent({
             category: "review",
             passNumber: index + 1,
-            model,
+            modelName: reviewModelNames[index] ?? input.model,
+            model: openrouter.chat(reviewModelNames[index] ?? input.model),
             tools,
             basePrompt
         })),
         ...Array.from({ length: codeQualityRunCount }, (_, index) => runWorkerAgent({
             category: "code-quality",
             passNumber: index + 1,
-            model,
+            modelName: codeQualityModelNames[index] ?? input.model,
+            model: openrouter.chat(codeQualityModelNames[index] ?? input.model),
             tools,
             basePrompt
         }))
@@ -73882,7 +73919,7 @@ function selectInlineComments(findings, commentableLines, maxComments) {
 }
 async function runWorkerAgent(args) {
     const startedAt = Date.now();
-    console.log(`Code Beat worker start: ${args.category} pass ${args.passNumber}`);
+    console.log(`Code Beat worker start: ${args.category} pass ${args.passNumber}, model=${args.modelName}`);
     try {
         const agent = new ToolLoopAgent({
             model: args.model,
@@ -73902,7 +73939,7 @@ async function runWorkerAgent(args) {
 
 You are ${args.category} pass ${args.passNumber}. Work independently. Use tools to inspect repository context when the diff alone is not enough. Return only high-confidence findings grounded in evidence.`
         });
-        console.log(`Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms, ` +
+        console.log(`Code Beat worker complete: ${args.category} pass ${args.passNumber}, model=${args.modelName} in ${Date.now() - startedAt}ms, ` +
             `response chars=${result.text.length}`);
         const output = normalizeAgentReviewResult(result.output, args.category);
         console.log(`Code Beat worker parsed: ${args.category} pass ${args.passNumber} produced ${output.findings.length} finding(s)`);
@@ -73914,11 +73951,11 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     }
     catch (error) {
         const message = review_formatError(error);
-        console.warn(`::warning::Code Beat worker skipped: ${args.category} pass ${args.passNumber} failed after ${Date.now() - startedAt}ms: ${message}`);
+        console.warn(`::warning::Code Beat worker skipped: ${args.category} pass ${args.passNumber} failed after ${Date.now() - startedAt}ms with model=${args.modelName}: ${message}`);
         return {
             category: args.category,
             output: {
-                summary: `${args.category} pass ${args.passNumber} was skipped after an error: ${message}`,
+                summary: `${args.category} pass ${args.passNumber} using ${args.modelName} was skipped after an error: ${message}`,
                 findings: []
             },
             skipped: true,
@@ -74254,6 +74291,16 @@ function clampRunCount(value) {
     }
     return Math.min(MAX_AGENT_RUNS, Math.max(0, Math.floor(value)));
 }
+function resolveModelNames(defaultModel, models, runCount) {
+    const usableModels = models.length > 0 ? models : [defaultModel];
+    return Array.from({ length: runCount }, (_, index) => usableModels[index % usableModels.length] ?? defaultModel);
+}
+function formatModelAssignments(models) {
+    if (models.length === 0) {
+        return "(none)";
+    }
+    return models.map((model, index) => `${index + 1}:${model}`).join(",");
+}
 function clampScore(score) {
     if (Number.isNaN(score)) {
         return 0;
@@ -74262,6 +74309,7 @@ function clampScore(score) {
 }
 //# sourceMappingURL=review.js.map
 ;// CONCATENATED MODULE: ./lib/index.js
+
 
 
 
@@ -74281,6 +74329,9 @@ async function run() {
         }
         const apiKey = getInput("openrouter-api-key", { required: true });
         const model = getInput("model") || "deepseek/deepseek-v4-flash";
+        const sharedModels = parseModelListInput("models");
+        const reviewModels = parseModelListInput("review-models");
+        const codeQualityModels = parseModelListInput("code-quality-models");
         const token = getInput("github-token") || process.env.GITHUB_TOKEN;
         if (!token) {
             setFailed("A GitHub token is required. Pass github-token or set GITHUB_TOKEN.");
@@ -74300,7 +74351,10 @@ async function run() {
         repo = repoName;
         prNumber = number;
         cleanupSuccessReaction = () => removeIssueReactionsByContent(client, repoOwner, repoName, number, "+1");
-        console.log(`Code Beat start: ${repoOwner}/${repoName}#${number}, model=${model}, review-runs=${reviewRuns}, code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
+        console.log(`Code Beat start: ${repoOwner}/${repoName}#${number}, model=${model}, ` +
+            `models=${formatModelList(sharedModels)}, review-models=${formatModelList(reviewModels)}, ` +
+            `code-quality-models=${formatModelList(codeQualityModels)}, review-runs=${reviewRuns}, ` +
+            `code-quality-runs=${codeQualityRuns}, max-comments=${maxComments}`);
         console.log(`Code Beat workspace: ${process.env.GITHUB_WORKSPACE ?? process.cwd()}`);
         const processingReactionId = await addIssueReaction(client, repoOwner, repoName, number, "eyes");
         cleanupProcessingReaction = () => removeIssueReaction(client, repoOwner, repoName, number, processingReactionId, "eyes");
@@ -74337,6 +74391,8 @@ async function run() {
         const review = await reviewPullRequest({
             apiKey,
             model,
+            reviewModels: reviewModels.length > 0 ? reviewModels : sharedModels,
+            codeQualityModels: codeQualityModels.length > 0 ? codeQualityModels : sharedModels,
             owner: repoOwner,
             repo: repoName,
             prNumber: number,
@@ -74780,6 +74836,12 @@ function parseOptionalNumberInput(name) {
         throw new Error(`${name} must be a number between 0 and 5.`);
     }
     return parsed;
+}
+function parseModelListInput(name) {
+    return parseModelListValue(getInput(name));
+}
+function formatModelList(models) {
+    return models.length > 0 ? models.join(",") : "(default)";
 }
 function lib_formatError(error) {
     return error instanceof Error ? error.message : String(error);

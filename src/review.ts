@@ -28,6 +28,8 @@ export interface PullRequestReviewThreadContext {
 export interface ReviewInput {
   apiKey: string;
   model: string;
+  reviewModels: string[];
+  codeQualityModels: string[];
   owner: string;
   repo: string;
   prNumber: number;
@@ -88,7 +90,6 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
   const openrouter = createOpenRouter({
     apiKey: input.apiKey
   });
-  const model = openrouter.chat(input.model);
   const diffContext = buildDiffContext(input.files);
   const repoInstructions = collectRepoInstructions(input.workspaceRoot);
   const basePrompt = buildReviewPrompt(input, diffContext.prompt, diffContext.truncated, repoInstructions);
@@ -114,12 +115,19 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
 
   const reviewRunCount = clampRunCount(input.reviewRuns);
   const codeQualityRunCount = clampRunCount(input.codeQualityRuns);
+  const reviewModelNames = resolveModelNames(input.model, input.reviewModels, reviewRunCount);
+  const codeQualityModelNames = resolveModelNames(input.model, input.codeQualityModels, codeQualityRunCount);
+  console.log(
+    `Code Beat model plan: review=${formatModelAssignments(reviewModelNames)}, ` +
+      `code-quality=${formatModelAssignments(codeQualityModelNames)}`
+  );
   const workerRuns = [
     ...Array.from({ length: reviewRunCount }, (_, index) =>
       runWorkerAgent({
         category: "review",
         passNumber: index + 1,
-        model,
+        modelName: reviewModelNames[index] ?? input.model,
+        model: openrouter.chat(reviewModelNames[index] ?? input.model),
         tools,
         basePrompt
       })
@@ -128,7 +136,8 @@ export async function reviewPullRequest(input: ReviewInput): Promise<ValidatedRe
       runWorkerAgent({
         category: "code-quality",
         passNumber: index + 1,
-        model,
+        modelName: codeQualityModelNames[index] ?? input.model,
+        model: openrouter.chat(codeQualityModelNames[index] ?? input.model),
         tools,
         basePrompt
       })
@@ -221,12 +230,13 @@ export function selectInlineComments(
 async function runWorkerAgent(args: {
   category: ReviewCategory;
   passNumber: number;
+  modelName: string;
   model: ReviewModel;
   tools: ReturnType<typeof createReviewTools>;
   basePrompt: string;
 }): Promise<WorkerRunResult> {
   const startedAt = Date.now();
-  console.log(`Code Beat worker start: ${args.category} pass ${args.passNumber}`);
+  console.log(`Code Beat worker start: ${args.category} pass ${args.passNumber}, model=${args.modelName}`);
   try {
     const agent = new ToolLoopAgent({
       model: args.model,
@@ -249,7 +259,7 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     });
 
     console.log(
-      `Code Beat worker complete: ${args.category} pass ${args.passNumber} in ${Date.now() - startedAt}ms, ` +
+      `Code Beat worker complete: ${args.category} pass ${args.passNumber}, model=${args.modelName} in ${Date.now() - startedAt}ms, ` +
         `response chars=${result.text.length}`
     );
     const output = normalizeAgentReviewResult(result.output, args.category);
@@ -266,12 +276,12 @@ You are ${args.category} pass ${args.passNumber}. Work independently. Use tools 
     console.warn(
       `::warning::Code Beat worker skipped: ${args.category} pass ${args.passNumber} failed after ${
         Date.now() - startedAt
-      }ms: ${message}`
+      }ms with model=${args.modelName}: ${message}`
     );
     return {
       category: args.category,
       output: {
-        summary: `${args.category} pass ${args.passNumber} was skipped after an error: ${message}`,
+        summary: `${args.category} pass ${args.passNumber} using ${args.modelName} was skipped after an error: ${message}`,
         findings: []
       },
       skipped: true,
@@ -693,6 +703,19 @@ function clampRunCount(value: number): number {
   }
 
   return Math.min(MAX_AGENT_RUNS, Math.max(0, Math.floor(value)));
+}
+
+function resolveModelNames(defaultModel: string, models: string[], runCount: number): string[] {
+  const usableModels = models.length > 0 ? models : [defaultModel];
+  return Array.from({ length: runCount }, (_, index) => usableModels[index % usableModels.length] ?? defaultModel);
+}
+
+function formatModelAssignments(models: string[]): string {
+  if (models.length === 0) {
+    return "(none)";
+  }
+
+  return models.map((model, index) => `${index + 1}:${model}`).join(",");
 }
 
 function clampScore(score: number): number {
