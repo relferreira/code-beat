@@ -17,8 +17,10 @@ export const Route = createFileRoute("/api/migrate")({
           return Response.json({ error: "auth_not_configured" }, { status: 503 });
         }
 
-        const url = new URL(request.url);
-        if (!authEnv.MIGRATE_SECRET || url.searchParams.get("secret") !== authEnv.MIGRATE_SECRET) {
+        // Accept the secret via header (no URL-encoding headaches) or query param.
+        const provided =
+          request.headers.get("x-migrate-secret") ?? new URL(request.url).searchParams.get("secret");
+        if (!authEnv.MIGRATE_SECRET || provided !== authEnv.MIGRATE_SECRET) {
           return Response.json({ error: "forbidden" }, { status: 403 });
         }
 

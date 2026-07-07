@@ -10,16 +10,16 @@
   "vars": {
     // Public base URL of this Worker. Must match the GitHub App callback origin.
     "BETTER_AUTH_URL": "https://code-beat.relferreira.workers.dev"
-  }
-  // ── Auth (uncomment after provisioning; see apps/viewer/README.md) ──────────────
-  // D1 holds Better Auth sessions + tokens only (never repo content). Until this is a
-  // real database id, `wrangler deploy` fails — so it stays commented so main deploys
-  // stay green. Create it with:  wrangler d1 create code-beat-viewer
-  //
-  // "d1_databases": [
-  //   { "binding": "DB", "database_name": "code-beat-viewer", "database_id": "PASTE_ID" }
-  // ]
-  //
-  // Secrets (set via `wrangler secret put` or the dashboard, NOT here):
-  //   BETTER_AUTH_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, MIGRATE_SECRET
+  },
+  // Don't wipe dashboard-set vars/secrets on deploy (they're configured in the dashboard,
+  // not here): BETTER_AUTH_SECRET, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, MIGRATE_SECRET.
+  "keep_vars": true,
+  // D1 holds Better Auth sessions + tokens only (never repo content).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "code-beat-viewer",
+      "database_id": "d3a873dc-a787-4536-9b00-7bf6324880a4"
+    }
+  ]
 }

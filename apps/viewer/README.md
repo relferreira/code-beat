@@ -72,20 +72,24 @@ browser ↔ GitHub — the Worker only mints a short-lived token.
    - Enable **Request user authorization (OAuth) during installation**.
    - Copy the **Client ID**, generate a **Client secret**, and **Install** the App on the
      repos/orgs you want to view.
-2. **Create D1:** `wrangler d1 create code-beat-viewer` → copy the `database_id`.
-3. **Uncomment** the `d1_databases` block in `wrangler.jsonc` and paste the id.
-4. **Set secrets** (`wrangler secret put <NAME>` or dashboard):
+2. **Create D1:** `wrangler d1 create code-beat-viewer` → put the `database_id` in the
+   `d1_databases` block in `wrangler.jsonc` (already set for this repo's deployment).
+3. **Set secrets** (`wrangler secret put <NAME>` or dashboard):
    `BETTER_AUTH_SECRET` (random), `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
    `MIGRATE_SECRET` (random). Confirm the `BETTER_AUTH_URL` var equals the deployed origin.
-5. **Deploy** (push to `main`, or `npm run deploy`).
-6. **Run migrations once:** `curl "<BETTER_AUTH_URL>/api/migrate?secret=<MIGRATE_SECRET>"` → `{"ok":true}`.
-7. Open a private repo's report URL → **Sign in with GitHub** → authorize → it renders.
+   (`keep_vars: true` in `wrangler.jsonc` stops deploys from wiping dashboard-set values.)
+4. **Deploy** (push to `main`, or `npm run deploy`).
+5. **Run migrations once** (header avoids URL-encoding the secret):
+   `curl -H "x-migrate-secret: <MIGRATE_SECRET>" "<BETTER_AUTH_URL>/api/migrate"` → `{"ok":true}`.
+6. Open a private repo's report URL → **Sign in with GitHub** → authorize → it renders.
 
-Local dev: `cp .dev.vars.example .dev.vars`, uncomment the D1 binding, `npm run dev`, then
-hit `/api/migrate?secret=...` against `http://localhost:3000`.
+Local dev: `cp .env.example .env` and fill it in, `npm run dev`, then
+`curl -H "x-migrate-secret: <MIGRATE_SECRET>" http://localhost:3000/api/migrate`.
+Local sign-in also needs `http://localhost:3000/api/auth/callback/github` added as a
+callback URL on the GitHub App and `BETTER_AUTH_URL=http://localhost:3000` in `.env`.
 
-Until D1 is provisioned the auth routes return 401/503 and the viewer stays public-only —
-so `main` keeps deploying green.
+If D1/secrets are absent (e.g. a fork), the auth routes return 401/503 and the viewer
+stays public-only, so `main` keeps deploying green.
 
 ## Notes
 
