@@ -66,7 +66,9 @@ export function ReportView({
             ) : null}
 
             <div className="diff">
-              {mounted ? (
+              {!file.patch ? (
+                <div className="no-diff">No diff available for this file.</div>
+              ) : mounted ? (
                 <Suspense fallback={<pre className="raw-patch">{file.patch}</pre>}>
                   <DiffPane patch={file.patch} />
                 </Suspense>

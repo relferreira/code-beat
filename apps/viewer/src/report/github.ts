@@ -68,6 +68,23 @@ interface PullFileResponse {
   patch?: string;
 }
 
+/**
+ * GitHub's pulls/files `patch` is only the hunks (starting at `@@`) — it omits the
+ * `diff --git` / `---` / `+++` header. @pierre/diffs' PatchDiff needs a complete
+ * single-file unified diff, so we reconstruct that header from the file metadata.
+ */
+function toSingleFileDiff(path: string, status: string, patch: string): string {
+  if (!patch) {
+    return "";
+  }
+  if (patch.startsWith("diff --git")) {
+    return patch;
+  }
+  const from = status === "added" ? "/dev/null" : `a/${path}`;
+  const to = status === "removed" ? "/dev/null" : `b/${path}`;
+  return `diff --git a/${path} b/${path}\n--- ${from}\n+++ ${to}\n${patch}`;
+}
+
 /** Fetch the PR's changed files (unified patches), following pagination. */
 export async function fetchPullFiles(ref: RepoRef, opts: FetchOpts = {}): Promise<ViewerFile[]> {
   const files: ViewerFile[] = [];
@@ -76,7 +93,11 @@ export async function fetchPullFiles(ref: RepoRef, opts: FetchOpts = {}): Promis
     const res = await ghFetch(path, opts);
     const batch = (await res.json()) as PullFileResponse[];
     for (const file of batch) {
-      files.push({ path: file.filename, status: file.status, patch: file.patch ?? "" });
+      files.push({
+        path: file.filename,
+        status: file.status,
+        patch: toSingleFileDiff(file.filename, file.status, file.patch ?? ""),
+      });
     }
     if (batch.length < 100) {
       break;
