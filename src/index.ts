@@ -2,11 +2,15 @@ import * as github from "@actions/github";
 import { getInput, setFailed, setOutput } from "./action-core.js";
 import { formatInlineComment, formatReviewBody } from "./format.js";
 import { parseModelListValue } from "./model-list.js";
+import { buildReport, buildViewerUrl, publishReport } from "./report.js";
 import { reviewPullRequest } from "./review.js";
 import type { PullRequestFile } from "./diff.js";
 import type { PullRequestReviewThreadContext } from "./review.js";
 
 type Octokit = ReturnType<typeof github.getOctokit>;
+
+// Kept in sync with package.json version; stamped into report.json.
+const TOOL_VERSION = "0.1.0";
 
 async function run(): Promise<void> {
   let cleanupProcessingReaction: (() => Promise<void>) | undefined;
@@ -41,6 +45,9 @@ async function run(): Promise<void> {
     const reviewRuns = parseIntegerInput("review-runs", 2);
     const codeQualityRuns = parseIntegerInput("code-quality-runs", 2);
     const failOnScoreBelow = parseOptionalNumberInput("fail-on-score-below");
+    const reportEnabled = parseBooleanInput("report", false);
+    const reportBranch = getInput("report-branch") || "code-beat-reports";
+    const viewerBaseUrl = getInput("viewer-url") || "https://code-beat.dev";
     const client = github.getOctokit(token);
     octokit = client;
     const repoContext = github.context.repo;
@@ -137,11 +144,41 @@ async function run(): Promise<void> {
     });
     console.log(`Code Beat AI review complete in ${Date.now() - reviewStartedAt}ms`);
 
+    let viewerUrl: string | undefined;
+    if (reportEnabled) {
+      // Best-effort: a report failure must never fail the review.
+      try {
+        viewerUrl = buildViewerUrl(viewerBaseUrl, repoOwner, repoName, number);
+        const report = buildReport({
+          toolName: "code-beat",
+          toolVersion: TOOL_VERSION,
+          owner: repoOwner,
+          repo: repoName,
+          model,
+          pullRequest: {
+            number,
+            title: pullRequest.title,
+            author: pullRequest.user?.login ?? "unknown",
+            baseRef: pullRequest.base.ref,
+            headRef: pullRequest.head.ref,
+            baseSha: pullRequest.base.sha,
+            headSha: pullRequest.head.sha
+          },
+          review
+        });
+        await publishReport(client, { owner: repoOwner, repo: repoName, branch: reportBranch, report });
+      } catch (error) {
+        viewerUrl = undefined;
+        console.warn(`::warning::Could not generate Code Beat report: ${formatError(error)}`);
+      }
+    }
+
     const body = formatReviewBody({
       result: review.result,
       postedComments: review.comments,
       skippedCommentCount: review.skippedCommentCount,
-      truncatedDiff: review.truncatedDiff
+      truncatedDiff: review.truncatedDiff,
+      viewerUrl
     });
 
     if (review.comments.length > 0) {
@@ -715,6 +752,23 @@ function parseIntegerInput(name: string, fallback: number): number {
   }
 
   return parsed;
+}
+
+function parseBooleanInput(name: string, fallback: boolean): boolean {
+  const value = getInput(name).toLowerCase();
+  if (!value) {
+    return fallback;
+  }
+
+  if (value === "true" || value === "1" || value === "yes") {
+    return true;
+  }
+
+  if (value === "false" || value === "0" || value === "no") {
+    return false;
+  }
+
+  throw new Error(`${name} must be a boolean (true or false).`);
 }
 
 function parseOptionalNumberInput(name: string): number | undefined {

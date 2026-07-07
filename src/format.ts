@@ -5,6 +5,7 @@ export function formatReviewBody(args: {
   postedComments: ReviewFinding[];
   skippedCommentCount: number;
   truncatedDiff: boolean;
+  viewerUrl?: string;
 }): string {
   const tone = getScoreTone(args.result.score);
   const lines = [
@@ -14,6 +15,10 @@ export function formatReviewBody(args: {
     "",
     args.result.summary.trim()
   ];
+
+  if (args.viewerUrl) {
+    lines.push("", `📊 **[View the full report and diff](${args.viewerUrl})**`);
+  }
 
   if (args.postedComments.length > 0) {
     lines.push("", `🎯 **Inline comments posted:** ${args.postedComments.length}`);

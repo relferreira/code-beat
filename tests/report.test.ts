@@ -1,0 +1,92 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { buildReport, buildViewerUrl, reportPath } from "../src/report.js";
+import { reportSchema } from "../src/report-schema.js";
+import type { ValidatedReview } from "../src/review.js";
+
+function makeReview(overrides: Partial<ValidatedReview> = {}): ValidatedReview {
+  return {
+    result: {
+      score: 4,
+      summary: "Solid change.",
+      findings: [
+        { path: "src/a.ts", line: 10, severity: "major", title: "Guard missing", body: "Add a guard." },
+        { path: "src/b.ts", line: 3, severity: "minor", title: "Naming", body: "Rename this." }
+      ]
+    },
+    comments: [{ path: "src/a.ts", line: 10, severity: "major", title: "Guard missing", body: "Add a guard." }],
+    skippedCommentCount: 1,
+    truncatedDiff: false,
+    ...overrides
+  };
+}
+
+function makeArgs(review: ValidatedReview) {
+  return {
+    toolName: "code-beat",
+    toolVersion: "0.1.0",
+    generatedAt: "2026-07-07T00:00:00.000Z",
+    owner: "relferreira",
+    repo: "code-beat",
+    model: "deepseek/deepseek-v4-flash",
+    pullRequest: {
+      number: 123,
+      title: "Add report viewer",
+      author: "relferreira",
+      baseRef: "main",
+      headRef: "feature/report",
+      baseSha: "aaaaaaa",
+      headSha: "bbbbbbb"
+    },
+    review
+  };
+}
+
+describe("buildReport", () => {
+  it("produces a schema-valid report and flags posted findings", () => {
+    const report = buildReport(makeArgs(makeReview()));
+
+    assert.doesNotThrow(() => reportSchema.parse(report));
+    assert.equal(report.schemaVersion, 1);
+    assert.equal(report.pullRequest.headSha, "bbbbbbb");
+    assert.equal(report.review.findings.length, 2);
+
+    const posted = report.review.findings.find((f) => f.path === "src/a.ts");
+    const skipped = report.review.findings.find((f) => f.path === "src/b.ts");
+    assert.equal(posted?.posted, true);
+    assert.equal(skipped?.posted, false);
+  });
+
+  it("carries score, model, and skipped count through", () => {
+    const report = buildReport(makeArgs(makeReview({ skippedCommentCount: 3, truncatedDiff: true })));
+    assert.equal(report.review.score, 4);
+    assert.equal(report.review.model, "deepseek/deepseek-v4-flash");
+    assert.equal(report.review.skippedCommentCount, 3);
+    assert.equal(report.review.truncatedDiff, true);
+  });
+
+  it("defaults generatedAt to an ISO timestamp when omitted", () => {
+    const args = makeArgs(makeReview());
+    const report = buildReport({ ...args, generatedAt: undefined });
+    assert.match(report.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("buildViewerUrl", () => {
+  it("builds a PR URL and trims trailing slashes", () => {
+    assert.equal(
+      buildViewerUrl("https://code-beat.dev/", "relferreira", "code-beat", 123),
+      "https://code-beat.dev/relferreira/code-beat/pull/123"
+    );
+  });
+
+  it("returns undefined for an empty base URL", () => {
+    assert.equal(buildViewerUrl("   ", "relferreira", "code-beat", 123), undefined);
+  });
+});
+
+describe("reportPath", () => {
+  it("is per-PR", () => {
+    assert.equal(reportPath(123), "reports/pr-123/report.json");
+  });
+});

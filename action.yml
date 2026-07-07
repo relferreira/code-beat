@@ -53,6 +53,20 @@ inputs:
     description: Optional numeric threshold. The action fails when the score is below this value.
     required: false
     default: ""
+  report:
+    description: >-
+      Generate a self-contained review report, commit it to the report branch, and add a
+      link to the review comment. Off by default. Requires contents write permission.
+    required: false
+    default: "false"
+  report-branch:
+    description: Orphan branch the report JSON is committed to when report is enabled.
+    required: false
+    default: code-beat-reports
+  viewer-url:
+    description: Base URL of the report viewer. Override to point at a self-hosted instance.
+    required: false
+    default: https://code-beat.dev
 runs:
   using: node24
   main: dist/index.js
