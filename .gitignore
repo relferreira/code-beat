@@ -1,5 +1,6 @@
 node_modules/
-lib/
+# Anchor to repo root: this is the action's compiled output, not apps/viewer/src/lib.
+/lib/
 test-dist/
 coverage/
 .env

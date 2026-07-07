@@ -189,6 +189,30 @@ body {
   font-size: 0.85rem;
 }
 
+.authbar {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0.75rem 1.25rem 0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.empty-state .button {
+  margin-top: 1rem;
+  cursor: pointer;
+  border: none;
+}
+
 .footer {
   margin-top: 3rem;
   color: var(--muted);

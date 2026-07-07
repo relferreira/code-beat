@@ -59,6 +59,34 @@ No secrets or bindings are needed for the current fixture app (D1 is commented o
 Domain under the Worker's **Settings → Domains & Routes** (the zone must be on Cloudflare),
 then set the action's `viewer-url` input to that domain.
 
+## Enabling auth (private repos)
+
+The viewer works for **public** repos with no auth. Private repos (and escaping GitHub's
+60 req/hr unauthenticated limit) need a GitHub App + D1. Repo content is still fetched
+browser ↔ GitHub — the Worker only mints a short-lived token.
+
+1. **Register a GitHub App** (Settings → Developer settings → GitHub Apps → New):
+   - **Callback URL:** `<BETTER_AUTH_URL>/api/auth/callback/github`
+     (e.g. `https://code-beat.relferreira.workers.dev/api/auth/callback/github`)
+   - **Permissions (read-only):** Repository → *Contents*, *Pull requests*; Account → *Email addresses*
+   - Enable **Request user authorization (OAuth) during installation**.
+   - Copy the **Client ID**, generate a **Client secret**, and **Install** the App on the
+     repos/orgs you want to view.
+2. **Create D1:** `wrangler d1 create code-beat-viewer` → copy the `database_id`.
+3. **Uncomment** the `d1_databases` block in `wrangler.jsonc` and paste the id.
+4. **Set secrets** (`wrangler secret put <NAME>` or dashboard):
+   `BETTER_AUTH_SECRET` (random), `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
+   `MIGRATE_SECRET` (random). Confirm the `BETTER_AUTH_URL` var equals the deployed origin.
+5. **Deploy** (push to `main`, or `npm run deploy`).
+6. **Run migrations once:** `curl "<BETTER_AUTH_URL>/api/migrate?secret=<MIGRATE_SECRET>"` → `{"ok":true}`.
+7. Open a private repo's report URL → **Sign in with GitHub** → authorize → it renders.
+
+Local dev: `cp .dev.vars.example .dev.vars`, uncomment the D1 binding, `npm run dev`, then
+hit `/api/migrate?secret=...` against `http://localhost:3000`.
+
+Until D1 is provisioned the auth routes return 401/503 and the viewer stays public-only —
+so `main` keeps deploying green.
+
 ## Notes
 
 - **SPA mode** (`tanstackStart({ spa: { enabled: true } })`) keeps route components

@@ -1,0 +1,11 @@
+# Copy to `.dev.vars` for local `wrangler dev` / `vite dev`. Do NOT commit `.dev.vars`.
+# In production, set these with `wrangler secret put <NAME>` or in the dashboard.
+
+# Must match this environment's origin and the GitHub App's callback URL
+# (<BETTER_AUTH_URL>/api/auth/callback/github). Locally: http://localhost:3000
+BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_SECRET=generate-a-long-random-string
+GITHUB_CLIENT_ID=your-github-app-client-id
+GITHUB_CLIENT_SECRET=your-github-app-client-secret
+# Guards the one-time /api/migrate endpoint.
+MIGRATE_SECRET=another-random-string
