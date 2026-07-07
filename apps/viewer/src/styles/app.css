@@ -188,3 +188,49 @@ body {
   color: var(--muted);
   font-size: 0.8rem;
 }
+
+.empty-state {
+  margin-top: 3rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.jump {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.jump input {
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.jump input[aria-label="owner"],
+.jump input[aria-label="repo"] {
+  width: 9rem;
+}
+
+.jump input[aria-label="pull request number"] {
+  width: 5rem;
+}
+
+.jump .sep {
+  color: var(--muted);
+}
+
+.jump .button {
+  margin-top: 0;
+  border: none;
+  cursor: pointer;
+}
