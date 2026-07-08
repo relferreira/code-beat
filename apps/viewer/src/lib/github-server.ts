@@ -1,4 +1,4 @@
-import type { PullSummary, Report, ViewerFile } from "../report/types";
+import type { PullSummary, RepoSummary, Report, ViewerFile } from "../report/types";
 
 // Server-side GitHub client. Runs on the Worker with the visitor's server-held token, so
 // repo content is a stateless pass-through and no GitHub token reaches the browser.
@@ -107,6 +107,39 @@ export async function loadReport(ref: RepoRef, token: string): Promise<LoadedRep
   const report = await fetchReport(ref, token);
   const files = await fetchPullFiles(ref, token);
   return { report, files };
+}
+
+interface RepoListResponse {
+  name: string;
+  full_name: string;
+  private: boolean;
+  pushed_at: string | null;
+  owner: { login: string };
+}
+
+/**
+ * Repos the signed-in user can reach, most-recently-pushed first. A GitHub App user token is
+ * scoped to accounts where the app is installed, so this spans every org with Code Beat
+ * installed — and nothing beyond it. Bounded to 3 pages (300 repos) to stay well under
+ * Cloudflare's per-request subrequest limit.
+ */
+export async function listUserRepos(token: string): Promise<RepoSummary[]> {
+  const repos: RepoSummary[] = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const res = await ghFetch(`/user/repos?sort=pushed&direction=desc&per_page=100&page=${page}`, token);
+    const batch = (await res.json()) as RepoListResponse[];
+    for (const repo of batch) {
+      repos.push({
+        owner: repo.owner.login,
+        name: repo.name,
+        fullName: repo.full_name,
+        private: repo.private,
+        pushedAt: repo.pushed_at,
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return repos;
 }
 
 interface PullListResponse {

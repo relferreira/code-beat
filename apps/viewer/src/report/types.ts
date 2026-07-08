@@ -54,3 +54,22 @@ export interface PullSummary {
   updatedAt: string;
   draft: boolean;
 }
+
+/**
+ * A repository the viewer can reach. Note: a GitHub App user token is scoped to accounts
+ * where the app is installed, so this only ever lists Code Beat-installed repos.
+ */
+export interface RepoSummary {
+  owner: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  pushedAt: string | null;
+}
+
+/** A feed entry: an open PR, tagged with the repo it belongs to. */
+export interface FeedItem {
+  owner: string;
+  repo: string;
+  pull: PullSummary;
+}

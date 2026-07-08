@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Dashboard } from "../components/Dashboard";
+import { AppShell } from "../components/AppShell";
+import { ReportContainer } from "../components/ReportContainer";
 
 export const Route = createFileRoute("/$owner/$repo/pull/$number")({
   component: PullRoute,
@@ -7,5 +8,10 @@ export const Route = createFileRoute("/$owner/$repo/pull/$number")({
 
 function PullRoute() {
   const { owner, repo, number } = Route.useParams();
-  return <Dashboard owner={owner} repo={repo} number={Number(number)} />;
+  const pullNumber = Number(number);
+  return (
+    <AppShell active={{ owner, repo, number: pullNumber }} loginSubtitle={`Sign in to view ${owner}/${repo}.`}>
+      <ReportContainer owner={owner} repo={repo} number={pullNumber} />
+    </AppShell>
+  );
 }
