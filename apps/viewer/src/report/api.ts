@@ -1,4 +1,4 @@
-import type { Report, ViewerFile } from "./types";
+import type { PullSummary, Report, ViewerFile } from "./types";
 
 export interface LoadedReport {
   report: Report;
@@ -22,4 +22,14 @@ export async function fetchReport(owner: string, repo: string, number: number): 
     throw new ApiError(res.status);
   }
   return (await res.json()) as LoadedReport;
+}
+
+/** Fetch open pull requests for the sidebar. */
+export async function fetchOpenPulls(owner: string, repo: string): Promise<PullSummary[]> {
+  const res = await fetch(`/api/pulls/${owner}/${repo}`, { credentials: "include" });
+  if (!res.ok) {
+    throw new ApiError(res.status);
+  }
+  const body = (await res.json()) as { pulls: PullSummary[] };
+  return body.pulls;
 }

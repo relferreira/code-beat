@@ -2,12 +2,14 @@ import { defineConfig } from "vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   server: {
     port: 3000,
   },
   plugins: [
+    tailwindcss(),
     // The Cloudflare plugin must come before tanstackStart(); see
     // https://developers.cloudflare.com/workers/framework-guides/web-apps/tanstack-start/
     cloudflare({ viteEnvironment: { name: "ssr" } }),

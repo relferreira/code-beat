@@ -37,11 +37,20 @@ export interface Report {
 }
 
 /**
- * A changed file plus its unified diff patch. In production this is fetched client-side
- * from GitHub's `pulls/{n}/files` API; `patch` is passed straight to @pierre/diffs.
+ * A changed file plus its unified diff patch. Fetched from GitHub's `pulls/{n}/files`
+ * API; `patch` is passed straight to @pierre/diffs.
  */
 export interface ViewerFile {
   path: string;
   status: string;
   patch: string;
+}
+
+/** One open pull request, for the sidebar list. */
+export interface PullSummary {
+  number: number;
+  title: string;
+  author: string;
+  updatedAt: string;
+  draft: boolean;
 }

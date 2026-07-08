@@ -1,266 +1,83 @@
+@import "tailwindcss";
+
+/* Manual theme: `dark:` keys off <html data-theme="dark"> (set before paint by themeInitScript). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* Theme-reactive surfaces/text so semantic utilities (bg-surface, text-fg…) adapt to the theme. */
 :root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --card: #f9fafb;
-  --accent: #d92d20;
+  --bg: #fbfbfc;
+  --surface: #ffffff;
+  --surface-2: #f4f5f7;
+  --surface-3: #eceef1;
+  --border-c: #e7e8ec;
+  --fg: #16171a;
+  --fg-2: #565a62;
+  --fg-3: #8b8f97;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1117;
-    --fg: #e6edf3;
-    --muted: #8b949e;
-    --border: #30363d;
-    --card: #161b22;
-    --accent: #ff6a5f;
+[data-theme="dark"] {
+  --bg: #08090a;
+  --surface: #0e0f11;
+  --surface-2: #17181b;
+  --surface-3: #1e2024;
+  --border-c: #212327;
+  --fg: #f3f4f6;
+  --fg-2: #a1a5ad;
+  --fg-3: #696d76;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border-c);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+
+  --color-brand: #f0544c;
+  --color-brand-hover: #ff6a62;
+
+  --color-sev-blocker: #ef4d54;
+  --color-sev-major: #e79a3c;
+  --color-sev-minor: #6b8afd;
+  --color-good: #3fb27f;
+  --color-warn: #dca63a;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
   }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-}
-
-.container {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem 1.25rem 4rem;
-}
-
-.masthead h1 {
-  font-size: 1.6rem;
-  margin: 0.25rem 0 0.75rem;
-}
-
-.tagline {
-  color: var(--muted);
-  margin-top: 0;
-}
-
-.crumbs {
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-variant: tabular-nums;
-}
-
-.score {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 1.1rem;
-}
-
-.score-label {
-  color: var(--muted);
-}
-
-.model {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.summary {
-  margin-top: 0.75rem;
-  padding: 0.75rem 1rem;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.25rem;
-}
-
-.button {
-  display: inline-block;
-  margin-top: 0.5rem;
-  padding: 0.5rem 0.9rem;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 6px;
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.files {
-  margin-top: 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 2rem;
-}
-
-.file {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.file-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.6rem 0.9rem;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
-}
-
-.file-status {
-  color: var(--muted);
-}
-
-.findings {
-  list-style: none;
-  margin: 0;
-  padding: 0.5rem 0.9rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.finding {
-  padding: 0.5rem 0;
-}
-
-.finding + .finding {
-  border-top: 1px dashed var(--border);
-}
-
-.finding-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.finding-title {
-  font-weight: 600;
-}
-
-.finding-line {
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-}
-
-.finding-skipped {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
-}
-
-.finding-body {
-  margin: 0.25rem 0 0;
-  color: var(--fg);
-}
-
-.diff {
-  overflow-x: auto;
-}
-
-.raw-patch {
-  margin: 0;
-  padding: 0.9rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8rem;
-  white-space: pre;
-  overflow-x: auto;
-}
-
-.no-diff {
-  padding: 0.9rem;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.authbar {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 0.75rem 1.25rem 0;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.link-button {
-  background: none;
-  border: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.empty-state .button {
-  margin-top: 1rem;
-  cursor: pointer;
-  border: none;
-}
-
-.footer {
-  margin-top: 3rem;
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.empty-state {
-  margin-top: 3rem;
-  padding: 2rem;
-  text-align: center;
-  color: var(--muted);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.jump {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-top: 1rem;
-  flex-wrap: wrap;
-}
-
-.jump input {
-  padding: 0.45rem 0.6rem;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font: inherit;
-}
-
-.jump input[aria-label="owner"],
-.jump input[aria-label="repo"] {
-  width: 9rem;
-}
-
-.jump input[aria-label="pull request number"] {
-  width: 5rem;
-}
-
-.jump .sep {
-  color: var(--muted);
-}
-
-.jump .button {
-  margin-top: 0;
-  border: none;
-  cursor: pointer;
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+  }
+  /* Thin, subtle scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--surface-3) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--surface-3);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
 }

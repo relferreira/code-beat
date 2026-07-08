@@ -1,4 +1,4 @@
-import type { Report, ViewerFile } from "../report/types";
+import type { PullSummary, Report, ViewerFile } from "../report/types";
 
 // Server-side GitHub client. Runs on the Worker with the visitor's server-held token, so
 // repo content is a stateless pass-through and no GitHub token reaches the browser.
@@ -107,4 +107,28 @@ export async function loadReport(ref: RepoRef, token: string): Promise<LoadedRep
   const report = await fetchReport(ref, token);
   const files = await fetchPullFiles(ref, token);
   return { report, files };
+}
+
+interface PullListResponse {
+  number: number;
+  title: string;
+  user?: { login?: string } | null;
+  updated_at: string;
+  draft?: boolean;
+}
+
+/** List a repo's open pull requests, most-recently-updated first (for the sidebar). */
+export async function listOpenPulls(owner: string, repo: string, token: string): Promise<PullSummary[]> {
+  const res = await ghFetch(
+    `/repos/${owner}/${repo}/pulls?state=open&per_page=100&sort=updated&direction=desc`,
+    token,
+  );
+  const batch = (await res.json()) as PullListResponse[];
+  return batch.map((pr) => ({
+    number: pr.number,
+    title: pr.title,
+    author: pr.user?.login ?? "unknown",
+    updatedAt: pr.updated_at,
+    draft: Boolean(pr.draft),
+  }));
 }
