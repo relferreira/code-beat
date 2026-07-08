@@ -1,4 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Markdown } from "../components/Markdown";
 import { SEVERITY, relativeTime } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { fetchFileContents } from "./api";
@@ -177,7 +178,7 @@ function CommentThread({ comments }: { comments: ReviewComment[] }) {
               </a>
               <span className="text-[11px] text-fg-3">{relativeTime(comment.createdAt)}</span>
             </div>
-            <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-fg-2">{comment.body}</p>
+            <Markdown className="mt-1 text-[13px] text-fg-2">{comment.body}</Markdown>
           </div>
         </div>
       ))}
@@ -201,7 +202,7 @@ function FindingItem({ finding }: { finding: ReportFinding }) {
           </span>
         ) : null}
       </div>
-      <p className="mt-1 text-sm leading-relaxed text-fg-2">{finding.body}</p>
+      <Markdown className="mt-1 text-sm text-fg-2">{finding.body}</Markdown>
     </li>
   );
 }

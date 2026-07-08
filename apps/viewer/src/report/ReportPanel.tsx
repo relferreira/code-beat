@@ -1,3 +1,4 @@
+import { Markdown } from "../components/Markdown";
 import { SCORE_DOT, SCORE_PILL, scoreTone } from "../lib/format";
 import { FileCard, type FileSource } from "./FileCard";
 import type { Report, ReportFinding, ViewerFile } from "./types";
@@ -28,9 +29,9 @@ export function ReportPanel({
         <span className="font-mono text-xs text-fg-3">{report.review.model}</span>
       </div>
 
-      <p className="mt-4 rounded-xl border border-border bg-surface p-4 text-sm leading-relaxed text-fg-2">
+      <Markdown className="mt-4 rounded-xl border border-border bg-surface p-4 text-sm text-fg-2">
         {report.review.summary}
-      </p>
+      </Markdown>
 
       <div className="mt-6 space-y-6">
         {files.map((file) => (
