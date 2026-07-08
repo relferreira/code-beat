@@ -36,12 +36,15 @@ export default function DiffPane({
 }) {
   const shikiTheme = theme === "dark" ? "github-dark" : "github-light";
 
+  // overflow: "wrap" makes long lines wrap instead of scrolling horizontally. Besides being a
+  // reasonable full-width reading mode, it's what keeps inline comment annotations from being
+  // clipped: with no horizontal scroll, the annotation row is exactly the visible width.
   if (oldContents !== undefined && newContents !== undefined) {
     return (
       <MultiFileDiff<ReviewComment[]>
         oldFile={{ name: fileName, contents: oldContents }}
         newFile={{ name: fileName, contents: newContents }}
-        options={{ theme: shikiTheme, expandUnchanged: true }}
+        options={{ theme: shikiTheme, expandUnchanged: true, overflow: "wrap" }}
         lineAnnotations={annotations}
         renderAnnotation={renderAnnotation}
         disableWorkerPool
@@ -52,7 +55,7 @@ export default function DiffPane({
   return (
     <PatchDiff<ReviewComment[]>
       patch={patch ?? ""}
-      options={{ theme: shikiTheme }}
+      options={{ theme: shikiTheme, overflow: "wrap" }}
       lineAnnotations={annotations}
       renderAnnotation={renderAnnotation}
       disableWorkerPool
