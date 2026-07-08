@@ -1,4 +1,4 @@
-import type { PullDetail, PullSummary, RepoSummary, Report, ViewerFile } from "../report/types";
+import type { PullDetail, PullSummary, RepoSummary, Report, ReviewComment, ViewerFile } from "../report/types";
 
 // Server-side GitHub client. Runs on the Worker with the visitor's server-held token, so
 // repo content is a stateless pass-through and no GitHub token reaches the browser.
@@ -24,10 +24,10 @@ export interface RepoRef {
   number: number;
 }
 
-async function ghFetch(path: string, token: string): Promise<Response> {
+async function ghFetch(path: string, token: string, accept = "application/vnd.github+json"): Promise<Response> {
   const res = await fetch(`${API}${path}`, {
     headers: {
-      Accept: "application/vnd.github+json",
+      Accept: accept,
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
       Authorization: `Bearer ${token}`,
@@ -37,6 +37,74 @@ async function ghFetch(path: string, token: string): Promise<Response> {
     throw new GitHubError(res.status, `GitHub ${res.status} for ${path}`);
   }
   return res;
+}
+
+/**
+ * Whole-file contents at a ref, as raw text. Returns "" when the file doesn't exist at that
+ * ref (added files have no base version; removed files have no head version).
+ */
+export async function getFileContents(
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+  token: string,
+): Promise<string> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  try {
+    const res = await ghFetch(
+      `/repos/${owner}/${repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
+      token,
+      "application/vnd.github.raw",
+    );
+    return await res.text();
+  } catch (error) {
+    if (error instanceof GitHubError && error.status === 404) return "";
+    throw error;
+  }
+}
+
+interface ReviewCommentResponse {
+  id: number;
+  path: string;
+  line: number | null;
+  original_line: number | null;
+  side: string | null;
+  body: string;
+  user?: { login?: string; avatar_url?: string } | null;
+  created_at: string;
+  html_url: string;
+}
+
+/** Inline review comments on the PR's diff lines. Includes Code Beat's own posted comments. */
+async function listReviewComments(ref: RepoRef, token: string): Promise<ReviewComment[]> {
+  const comments: ReviewComment[] = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const res = await ghFetch(
+      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments?per_page=100&page=${page}`,
+      token,
+    );
+    const batch = (await res.json()) as ReviewCommentResponse[];
+    for (const comment of batch) {
+      // `line` is null for comments whose lines are no longer in the diff; fall back to the
+      // line they were originally left on, and skip file-level comments entirely.
+      const line = comment.line ?? comment.original_line;
+      if (line == null) continue;
+      comments.push({
+        id: comment.id,
+        path: comment.path,
+        line,
+        side: comment.side === "LEFT" ? "LEFT" : "RIGHT",
+        body: comment.body,
+        author: comment.user?.login ?? "unknown",
+        authorAvatar: comment.user?.avatar_url,
+        createdAt: comment.created_at,
+        htmlUrl: comment.html_url,
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return comments;
 }
 
 function decodeBase64Utf8(b64: string): string {
@@ -105,8 +173,8 @@ interface PullDetailResponse {
   draft?: boolean;
   merged?: boolean;
   user?: { login?: string; avatar_url?: string } | null;
-  base: { ref: string };
-  head: { ref: string };
+  base: { ref: string; sha: string };
+  head: { ref: string; sha: string };
   additions: number;
   deletions: number;
   changed_files: number;
@@ -130,6 +198,8 @@ async function getPullRequest(ref: RepoRef, token: string): Promise<PullDetail> 
     draft: Boolean(pr.draft),
     baseRef: pr.base.ref,
     headRef: pr.head.ref,
+    baseSha: pr.base.sha,
+    headSha: pr.head.sha,
     additions: pr.additions,
     deletions: pr.deletions,
     changedFiles: pr.changed_files,
@@ -145,6 +215,7 @@ export interface PullViewData {
   files: ViewerFile[];
   /** null when Code Beat hasn't reviewed this PR yet — the PR tab still renders. */
   report: Report | null;
+  comments: ReviewComment[];
 }
 
 /**
@@ -152,15 +223,17 @@ export interface PullViewData {
  * the GitHub-style PR tab must work for un-reviewed PRs.
  */
 export async function loadPullView(ref: RepoRef, token: string): Promise<PullViewData> {
-  const [pull, files, report] = await Promise.all([
+  const [pull, files, report, comments] = await Promise.all([
     getPullRequest(ref, token),
     fetchPullFiles(ref, token),
     fetchReport(ref, token).catch((error: unknown) => {
       if (error instanceof GitHubError && error.status === 404) return null;
       throw error;
     }),
+    // Comments are a nicety: never fail the whole view over them.
+    listReviewComments(ref, token).catch(() => [] as ReviewComment[]),
   ]);
-  return { pull, files, report };
+  return { pull, files, report, comments };
 }
 
 interface RepoListResponse {

@@ -58,12 +58,29 @@ export interface PullDetail {
   draft: boolean;
   baseRef: string;
   headRef: string;
+  /** Used to fetch whole-file contents for full-context diffs. */
+  baseSha: string;
+  headSha: string;
   additions: number;
   deletions: number;
   changedFiles: number;
   commits: number;
   createdAt: string;
   updatedAt: string;
+  htmlUrl: string;
+}
+
+/** An inline review comment on a diff line (includes Code Beat's own posted comments). */
+export interface ReviewComment {
+  id: number;
+  path: string;
+  line: number;
+  /** LEFT = the base (deleted) side, RIGHT = the head (added) side. */
+  side: "LEFT" | "RIGHT";
+  body: string;
+  author: string;
+  authorAvatar?: string;
+  createdAt: string;
   htmlUrl: string;
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { CenterMessage } from "./CenterMessage";
 import { PullFiles } from "./PullFiles";
 import { ReportPanel } from "../report/ReportPanel";
+import type { FileSource } from "../report/FileCard";
 import { ApiError, fetchPullView, type PullViewData } from "../report/api";
 import { usePulls } from "../lib/data";
 import { SCORE_DOT, scoreTone } from "../lib/format";
@@ -64,18 +65,19 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
   }
   if (state.status === "error") return <CenterMessage>Could not load pull request: {state.message}</CenterMessage>;
 
-  const { pull, files, report } = state.data;
+  const { pull, files, report, comments } = state.data;
   const activeTab: Tab = tab ?? (report ? "report" : "pr");
+  const source: FileSource = { owner, repo, baseSha: pull.baseSha, headSha: pull.headSha };
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-8">
+    <div className="w-full px-6 py-8">
       <PullHeader owner={owner} repo={repo} pull={pull} />
       <Tabs active={activeTab} onChange={setTab} report={report} />
 
       <div className="mt-6">
         {activeTab === "report" ? (
           report ? (
-            <ReportPanel report={report} files={files} />
+            <ReportPanel report={report} files={files} source={source} />
           ) : (
             <div className="rounded-xl border border-border bg-surface px-4 py-10 text-center text-sm text-fg-3">
               No Code Beat report for this pull request yet. It appears once the review action runs with report
@@ -83,7 +85,7 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
             </div>
           )
         ) : (
-          <PullFiles pull={pull} files={files} />
+          <PullFiles pull={pull} files={files} comments={comments} source={source} />
         )}
       </div>
     </div>

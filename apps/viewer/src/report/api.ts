@@ -1,10 +1,11 @@
-import type { PullDetail, PullSummary, RepoSummary, Report, ViewerFile } from "./types";
+import type { PullDetail, PullSummary, RepoSummary, Report, ReviewComment, ViewerFile } from "./types";
 
 export interface PullViewData {
   pull: PullDetail;
   files: ViewerFile[];
   /** null when Code Beat hasn't reviewed this PR yet. */
   report: Report | null;
+  comments: ReviewComment[];
 }
 
 export class ApiError extends Error {
@@ -24,6 +25,22 @@ export async function fetchPullView(owner: string, repo: string, number: number)
     throw new ApiError(res.status);
   }
   return (await res.json()) as PullViewData;
+}
+
+/** Fetch a file's whole contents at a ref (for full-context diffs). */
+export async function fetchFileContents(
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string> {
+  const query = new URLSearchParams({ path, ref });
+  const res = await fetch(`/api/file/${owner}/${repo}?${query}`, { credentials: "include" });
+  if (!res.ok) {
+    throw new ApiError(res.status);
+  }
+  const body = (await res.json()) as { contents: string };
+  return body.contents;
 }
 
 /** Fetch open pull requests for a repo. */

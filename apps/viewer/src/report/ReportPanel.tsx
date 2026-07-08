@@ -1,9 +1,17 @@
 import { SCORE_DOT, SCORE_PILL, scoreTone } from "../lib/format";
-import { FileCard } from "./FileCard";
+import { FileCard, type FileSource } from "./FileCard";
 import type { Report, ReportFinding, ViewerFile } from "./types";
 
 /** Report tab: score, summary, and each file's diff annotated with findings. */
-export function ReportPanel({ report, files }: { report: Report; files: ViewerFile[] }) {
+export function ReportPanel({
+  report,
+  files,
+  source,
+}: {
+  report: Report;
+  files: ViewerFile[];
+  source: FileSource;
+}) {
   const tone = scoreTone(report.review.score);
   const findingsByPath = groupBy(report.review.findings, (f) => f.path);
 
@@ -26,7 +34,7 @@ export function ReportPanel({ report, files }: { report: Report; files: ViewerFi
 
       <div className="mt-6 space-y-6">
         {files.map((file) => (
-          <FileCard key={file.path} file={file} findings={findingsByPath.get(file.path)} />
+          <FileCard key={file.path} file={file} findings={findingsByPath.get(file.path)} source={source} />
         ))}
       </div>
 
