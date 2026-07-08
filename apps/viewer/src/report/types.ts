@@ -46,6 +46,27 @@ export interface ViewerFile {
   patch: string;
 }
 
+/** Full pull request detail, for the GitHub-style PR tab. */
+export interface PullDetail {
+  number: number;
+  title: string;
+  body: string;
+  author: string;
+  authorAvatar?: string;
+  state: "open" | "closed";
+  merged: boolean;
+  draft: boolean;
+  baseRef: string;
+  headRef: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  commits: number;
+  createdAt: string;
+  updatedAt: string;
+  htmlUrl: string;
+}
+
 /** One open pull request, for the sidebar list. */
 export interface PullSummary {
   number: number;

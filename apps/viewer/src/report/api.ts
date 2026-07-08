@@ -1,8 +1,10 @@
-import type { PullSummary, RepoSummary, Report, ViewerFile } from "./types";
+import type { PullDetail, PullSummary, RepoSummary, Report, ViewerFile } from "./types";
 
-export interface LoadedReport {
-  report: Report;
+export interface PullViewData {
+  pull: PullDetail;
   files: ViewerFile[];
+  /** null when Code Beat hasn't reviewed this PR yet. */
+  report: Report | null;
 }
 
 export class ApiError extends Error {
@@ -13,15 +15,15 @@ export class ApiError extends Error {
 }
 
 /**
- * Fetch the report + diff from our own Worker (which proxies GitHub server-side with the
- * signed-in visitor's token). No GitHub token ever reaches the browser.
+ * Fetch the PR, its diff, and its report from our own Worker (which proxies GitHub
+ * server-side with the signed-in visitor's token). No GitHub token reaches the browser.
  */
-export async function fetchReport(owner: string, repo: string, number: number): Promise<LoadedReport> {
-  const res = await fetch(`/api/report/${owner}/${repo}/${number}`, { credentials: "include" });
+export async function fetchPullView(owner: string, repo: string, number: number): Promise<PullViewData> {
+  const res = await fetch(`/api/pr/${owner}/${repo}/${number}`, { credentials: "include" });
   if (!res.ok) {
     throw new ApiError(res.status);
   }
-  return (await res.json()) as LoadedReport;
+  return (await res.json()) as PullViewData;
 }
 
 /** Fetch open pull requests for a repo. */

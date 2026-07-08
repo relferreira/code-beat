@@ -1,4 +1,4 @@
-import type { PullSummary, RepoSummary, Report, ViewerFile } from "../report/types";
+import type { PullDetail, PullSummary, RepoSummary, Report, ViewerFile } from "../report/types";
 
 // Server-side GitHub client. Runs on the Worker with the visitor's server-held token, so
 // repo content is a stateless pass-through and no GitHub token reaches the browser.
@@ -97,16 +97,70 @@ async function fetchPullFiles(ref: RepoRef, token: string): Promise<ViewerFile[]
   return files;
 }
 
-export interface LoadedReport {
-  report: Report;
-  files: ViewerFile[];
+interface PullDetailResponse {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  draft?: boolean;
+  merged?: boolean;
+  user?: { login?: string; avatar_url?: string } | null;
+  base: { ref: string };
+  head: { ref: string };
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  commits: number;
+  created_at: string;
+  updated_at: string;
+  html_url: string;
 }
 
-export async function loadReport(ref: RepoRef, token: string): Promise<LoadedReport> {
-  // Report first: a 404 here is the meaningful "not published yet" signal.
-  const report = await fetchReport(ref, token);
-  const files = await fetchPullFiles(ref, token);
-  return { report, files };
+async function getPullRequest(ref: RepoRef, token: string): Promise<PullDetail> {
+  const res = await ghFetch(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token);
+  const pr = (await res.json()) as PullDetailResponse;
+  return {
+    number: pr.number,
+    title: pr.title,
+    body: pr.body ?? "",
+    author: pr.user?.login ?? "unknown",
+    authorAvatar: pr.user?.avatar_url,
+    state: pr.state === "closed" ? "closed" : "open",
+    merged: Boolean(pr.merged),
+    draft: Boolean(pr.draft),
+    baseRef: pr.base.ref,
+    headRef: pr.head.ref,
+    additions: pr.additions,
+    deletions: pr.deletions,
+    changedFiles: pr.changed_files,
+    commits: pr.commits,
+    createdAt: pr.created_at,
+    updatedAt: pr.updated_at,
+    htmlUrl: pr.html_url,
+  };
+}
+
+export interface PullViewData {
+  pull: PullDetail;
+  files: ViewerFile[];
+  /** null when Code Beat hasn't reviewed this PR yet — the PR tab still renders. */
+  report: Report | null;
+}
+
+/**
+ * Everything the PR viewer needs, in one round trip. A missing report is not an error:
+ * the GitHub-style PR tab must work for un-reviewed PRs.
+ */
+export async function loadPullView(ref: RepoRef, token: string): Promise<PullViewData> {
+  const [pull, files, report] = await Promise.all([
+    getPullRequest(ref, token),
+    fetchPullFiles(ref, token),
+    fetchReport(ref, token).catch((error: unknown) => {
+      if (error instanceof GitHubError && error.status === 404) return null;
+      throw error;
+    }),
+  ]);
+  return { pull, files, report };
 }
 
 interface RepoListResponse {
