@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ReportView } from "../report/ReportView";
-import { GitHubError, loadReport, type LoadedReport } from "../report/github";
-import { useGitHubAuth } from "../lib/auth-client";
+import { ApiError, fetchReport, type LoadedReport } from "../report/api";
+import { useAuth } from "../lib/auth-client";
 
 export const Route = createFileRoute("/$owner/$repo/pull/$number")({
   component: ReportRoutePage,
@@ -10,35 +10,37 @@ export const Route = createFileRoute("/$owner/$repo/pull/$number")({
 
 type State =
   | { status: "loading" }
+  | { status: "signin" }
   | { status: "empty" }
-  | { status: "notFound" }
   | { status: "error"; message: string }
   | { status: "ready"; data: LoadedReport };
 
 function ReportRoutePage() {
   const { owner, repo, number } = Route.useParams();
-  const auth = useGitHubAuth();
+  const auth = useAuth();
   const [state, setState] = useState<State>({ status: "loading" });
 
   useEffect(() => {
-    // Wait until we know whether a token is available so private repos work on first try.
     if (!auth.ready) return;
+    if (!auth.signedIn) {
+      setState({ status: "signin" });
+      return;
+    }
 
     let cancelled = false;
     setState({ status: "loading" });
 
-    // Repo content is fetched browser -> GitHub directly, with the visitor's token when
-    // signed in. It never passes through the Worker.
-    loadReport({ owner, repo, number: Number(number) }, { token: auth.token })
+    // Fetch from our own Worker; it proxies GitHub server-side with the session token.
+    fetchReport(owner, repo, Number(number))
       .then((data) => {
         if (!cancelled) setState({ status: "ready", data });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        if (error instanceof GitHubError && (error.status === 404 || error.status === 403)) {
-          // 404: no report, or a private repo we can't see unauthenticated.
-          // 403: unauthenticated rate limit. Both are resolved by signing in.
-          setState({ status: auth.signedIn ? "empty" : "notFound" });
+        if (error instanceof ApiError && error.status === 401) {
+          setState({ status: "signin" });
+        } else if (error instanceof ApiError && error.status === 404) {
+          setState({ status: "empty" });
         } else {
           setState({ status: "error", message: error instanceof Error ? error.message : String(error) });
         }
@@ -47,10 +49,18 @@ function ReportRoutePage() {
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, number, auth.ready, auth.token, auth.signedIn]);
+  }, [owner, repo, number, auth.ready, auth.signedIn]);
 
   if (!auth.ready || state.status === "loading") {
-    return <Centered auth={auth}>Loading report…</Centered>;
+    return <Centered auth={auth}>Loading…</Centered>;
+  }
+
+  if (state.status === "signin") {
+    return (
+      <Centered auth={auth}>
+        Sign in with GitHub to view the report for {owner}/{repo} #{number}.
+      </Centered>
+    );
   }
 
   if (state.status === "empty") {
@@ -58,15 +68,6 @@ function ReportRoutePage() {
       <Centered auth={auth}>
         No Code Beat report found for {owner}/{repo} #{number} yet. It appears once the review
         action runs with <code>report: true</code>.
-      </Centered>
-    );
-  }
-
-  if (state.status === "notFound") {
-    return (
-      <Centered auth={auth}>
-        Couldn't load {owner}/{repo} #{number}. If it's a private repository, sign in with GitHub
-        to view it.
       </Centered>
     );
   }
@@ -83,20 +84,14 @@ function ReportRoutePage() {
   );
 }
 
-type Auth = ReturnType<typeof useGitHubAuth>;
+type Auth = ReturnType<typeof useAuth>;
 
 function AuthBar({ auth }: { auth: Auth }) {
   return (
     <div className="authbar">
-      {auth.signedIn ? (
-        <button className="link-button" onClick={auth.signOut}>
-          Sign out
-        </button>
-      ) : (
-        <button className="link-button" onClick={auth.signIn}>
-          Sign in with GitHub
-        </button>
-      )}
+      <button className="link-button" onClick={auth.signOut}>
+        Sign out
+      </button>
     </div>
   );
 }

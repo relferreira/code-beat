@@ -1,7 +1,12 @@
-import type { Report, ViewerFile } from "./types";
+import type { Report, ViewerFile } from "../report/types";
+
+// Server-side GitHub client. Runs on the Worker with the visitor's server-held token, so
+// repo content is a stateless pass-through and no GitHub token reaches the browser.
 
 const API = "https://api.github.com";
 const REPORT_BRANCH = "code-beat-reports";
+// GitHub's API rejects server-to-server requests without a User-Agent.
+const USER_AGENT = "code-beat-viewer";
 
 export class GitHubError extends Error {
   constructor(
@@ -19,25 +24,15 @@ export interface RepoRef {
   number: number;
 }
 
-/**
- * Fetch options. `token` is optional today (public repos work unauthenticated); the auth
- * phase will pass the reviewer's short-lived GitHub token here without any other change.
- */
-export interface FetchOpts {
-  token?: string;
-  branch?: string;
-}
-
-async function ghFetch(path: string, opts: FetchOpts, accept = "application/vnd.github+json"): Promise<Response> {
-  const headers: Record<string, string> = {
-    Accept: accept,
-    "X-GitHub-Api-Version": "2022-11-28",
-  };
-  if (opts.token) {
-    headers.Authorization = `Bearer ${opts.token}`;
-  }
-
-  const res = await fetch(`${API}${path}`, { headers });
+async function ghFetch(path: string, token: string): Promise<Response> {
+  const res = await fetch(`${API}${path}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": USER_AGENT,
+      Authorization: `Bearer ${token}`,
+    },
+  });
   if (!res.ok) {
     throw new GitHubError(res.status, `GitHub ${res.status} for ${path}`);
   }
@@ -50,11 +45,9 @@ function decodeBase64Utf8(b64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-/** Fetch report.json from the report branch. Throws GitHubError(404) when not published yet. */
-export async function fetchReport(ref: RepoRef, opts: FetchOpts = {}): Promise<Report> {
-  const branch = opts.branch ?? REPORT_BRANCH;
-  const path = `/repos/${ref.owner}/${ref.repo}/contents/reports/pr-${ref.number}/report.json?ref=${branch}`;
-  const res = await ghFetch(path, opts);
+async function fetchReport(ref: RepoRef, token: string): Promise<Report> {
+  const path = `/repos/${ref.owner}/${ref.repo}/contents/reports/pr-${ref.number}/report.json?ref=${REPORT_BRANCH}`;
+  const res = await ghFetch(path, token);
   const payload = (await res.json()) as { content?: string; encoding?: string };
   if (!payload.content || payload.encoding !== "base64") {
     throw new GitHubError(res.status, "Unexpected contents API response for report.json");
@@ -69,9 +62,8 @@ interface PullFileResponse {
 }
 
 /**
- * GitHub's pulls/files `patch` is only the hunks (starting at `@@`) — it omits the
- * `diff --git` / `---` / `+++` header. @pierre/diffs' PatchDiff needs a complete
- * single-file unified diff, so we reconstruct that header from the file metadata.
+ * GitHub's pulls/files `patch` is only the hunks — it omits the diff header that
+ * @pierre/diffs needs. Reconstruct a complete single-file unified diff.
  */
 function toSingleFileDiff(path: string, status: string, patch: string): string {
   if (!patch) {
@@ -85,12 +77,11 @@ function toSingleFileDiff(path: string, status: string, patch: string): string {
   return `diff --git a/${path} b/${path}\n--- ${from}\n+++ ${to}\n${patch}`;
 }
 
-/** Fetch the PR's changed files (unified patches), following pagination. */
-export async function fetchPullFiles(ref: RepoRef, opts: FetchOpts = {}): Promise<ViewerFile[]> {
+async function fetchPullFiles(ref: RepoRef, token: string): Promise<ViewerFile[]> {
   const files: ViewerFile[] = [];
   for (let page = 1; page <= 20; page += 1) {
     const path = `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/files?per_page=100&page=${page}`;
-    const res = await ghFetch(path, opts);
+    const res = await ghFetch(path, token);
     const batch = (await res.json()) as PullFileResponse[];
     for (const file of batch) {
       files.push({
@@ -111,9 +102,9 @@ export interface LoadedReport {
   files: ViewerFile[];
 }
 
-export async function loadReport(ref: RepoRef, opts: FetchOpts = {}): Promise<LoadedReport> {
+export async function loadReport(ref: RepoRef, token: string): Promise<LoadedReport> {
   // Report first: a 404 here is the meaningful "not published yet" signal.
-  const report = await fetchReport(ref, opts);
-  const files = await fetchPullFiles(ref, opts);
+  const report = await fetchReport(ref, token);
+  const files = await fetchPullFiles(ref, token);
   return { report, files };
 }
