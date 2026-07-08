@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "../components/Markdown";
 import { SEVERITY, relativeTime } from "../lib/format";
 import { useTheme } from "../lib/theme";
@@ -39,6 +39,27 @@ export function FileCard({
 
   const annotations = useMemo(() => (comments?.length ? buildAnnotations(comments) : undefined), [comments]);
   const canExpand = Boolean(source) && Boolean(file.patch);
+
+  // @pierre/diffs slots comment annotations into its diff grid, which is as wide as the code
+  // content. Left unchecked, a comment lays out at that width and gets clipped by the card's
+  // horizontal scroll. Pin each comment to the *visible* width instead (measured from the
+  // scroll container), sticky to the left so it stays readable while scrolling the code.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [commentWidth, setCommentWidth] = useState<number>();
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !annotations?.length) return;
+    const measure = () => setCommentWidth(el.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [annotations, mounted]);
+
+  const renderComment = useCallback(
+    (annotation: CommentAnnotation) => <CommentThread comments={annotation.metadata} width={commentWidth} />,
+    [commentWidth],
+  );
 
   async function toggleFullFile() {
     if (showFullFile) {
@@ -99,7 +120,7 @@ export function FileCard({
         </ul>
       ) : null}
 
-      <div className="overflow-x-auto bg-bg">
+      <div ref={scrollRef} className="overflow-x-auto bg-bg">
         {!file.patch ? (
           <div className="px-4 py-3 text-sm text-fg-3">No diff available for this file.</div>
         ) : mounted ? (
@@ -111,7 +132,7 @@ export function FileCard({
                 oldContents={contents.old}
                 newContents={contents.new}
                 annotations={annotations}
-                renderAnnotation={renderCommentThread}
+                renderAnnotation={renderComment}
               />
             ) : (
               <DiffPane
@@ -119,7 +140,7 @@ export function FileCard({
                 fileName={file.path}
                 patch={file.patch}
                 annotations={annotations}
-                renderAnnotation={renderCommentThread}
+                renderAnnotation={renderComment}
               />
             )}
           </Suspense>
@@ -152,13 +173,12 @@ function buildAnnotations(comments: ReviewComment[]): CommentAnnotation[] {
   });
 }
 
-function renderCommentThread(annotation: CommentAnnotation) {
-  return <CommentThread comments={annotation.metadata} />;
-}
-
-function CommentThread({ comments }: { comments: ReviewComment[] }) {
+function CommentThread({ comments, width }: { comments: ReviewComment[]; width?: number }) {
   return (
-    <div className="space-y-3 border-y border-border bg-surface px-4 py-3">
+    <div
+      className="sticky left-0 space-y-3 border-y border-border bg-surface px-4 py-3"
+      style={{ width: width ? `${width}px` : "100%", overflowWrap: "anywhere", wordBreak: "break-word" }}
+    >
       {comments.map((comment) => (
         <div key={comment.id} className="flex gap-2.5">
           <span className="size-6 shrink-0 overflow-hidden rounded-full bg-surface-3">

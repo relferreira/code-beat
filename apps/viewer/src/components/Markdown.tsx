@@ -65,7 +65,7 @@ const components: Components = {
 
 export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
-    <div className={className}>
+    <div className={`min-w-0 ${className ?? ""}`} style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {children}
       </ReactMarkdown>
