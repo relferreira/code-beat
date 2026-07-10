@@ -1,3 +1,4 @@
+import type { PrOverview } from "./report-schema.js";
 import type { ReviewFinding, ReviewResult } from "./schema.js";
 
 export function formatReviewBody(args: {
@@ -6,15 +7,22 @@ export function formatReviewBody(args: {
   skippedCommentCount: number;
   truncatedDiff: boolean;
   viewerUrl?: string;
+  /** When present, surface a one-line PR overview above the review summary. */
+  overview?: PrOverview;
 }): string {
   const tone = getScoreTone(args.result.score);
   const lines = [
     `## ${tone.emoji} Code Beat review`,
     "",
     `**Score:** ${tone.badge} **${args.result.score}/5** - ${tone.label}`,
-    "",
-    args.result.summary.trim()
+    ""
   ];
+
+  if (args.overview?.headline) {
+    lines.push(`**What this PR does:** ${args.overview.headline.trim()}`, "");
+  }
+
+  lines.push(args.result.summary.trim());
 
   if (args.viewerUrl) {
     lines.push("", `📊 **[View the full report and diff](${args.viewerUrl})**`);

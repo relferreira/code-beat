@@ -36912,9 +36912,12 @@ function formatReviewBody(args) {
         `## ${tone.emoji} Code Beat review`,
         "",
         `**Score:** ${tone.badge} **${args.result.score}/5** - ${tone.label}`,
-        "",
-        args.result.summary.trim()
+        ""
     ];
+    if (args.overview?.headline) {
+        lines.push(`**What this PR does:** ${args.overview.headline.trim()}`, "");
+    }
+    lines.push(args.result.summary.trim());
     if (args.viewerUrl) {
         lines.push("", `📊 **[View the full report and diff](${args.viewerUrl})**`);
     }
@@ -77358,12 +77361,13 @@ async function run() {
         });
         console.log(`Code Beat AI review complete in ${Date.now() - reviewStartedAt}ms`);
         let viewerUrl;
+        let reportOverview;
         if (reportEnabled) {
             // Best-effort: a report failure must never fail the review.
             try {
                 viewerUrl = buildViewerUrl(viewerBaseUrl, repoOwner, repoName, number);
                 const prFiles = files.map(toPullRequestFile);
-                const overview = await generatePrOverview({
+                reportOverview = await generatePrOverview({
                     apiKey,
                     model,
                     retryPolicy: {
@@ -77396,13 +77400,14 @@ async function run() {
                         baseSha: pullRequest.base.sha,
                         headSha: pullRequest.head.sha
                     },
-                    overview,
+                    overview: reportOverview,
                     review
                 });
                 await publishReport(client, { owner: repoOwner, repo: repoName, branch: reportBranch, report });
             }
             catch (error) {
                 viewerUrl = undefined;
+                reportOverview = undefined;
                 console.warn(`::warning::Could not generate Code Beat report: ${lib_formatError(error)}`);
             }
         }
@@ -77411,7 +77416,8 @@ async function run() {
             postedComments: review.comments,
             skippedCommentCount: review.skippedCommentCount,
             truncatedDiff: review.truncatedDiff,
-            viewerUrl
+            viewerUrl,
+            overview: reportOverview
         });
         if (review.comments.length > 0) {
             console.log(`Code Beat posting PR review with ${review.comments.length} inline comment(s)`);

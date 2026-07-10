@@ -46,6 +46,29 @@ describe("formatReviewBody", () => {
     assert.match(body, /🧹 \*\*Skipped inline comments:\*\* 2 finding\(s\)/);
     assert.match(body, /📎 \*\*Note:\*\*/);
   });
+
+  it("surfaces the PR overview headline when provided", () => {
+    const body = formatReviewBody({
+      result: {
+        score: 5,
+        summary: "No issues found.",
+        findings: []
+      },
+      postedComments: [],
+      skippedCommentCount: 0,
+      truncatedDiff: false,
+      overview: {
+        headline: "Adds loyalty points accrual and burn for checkout.",
+        body: "Long form overview…",
+        majorDecisions: ["Integer points only."],
+        areas: ["loyalty", "pricing"]
+      },
+      viewerUrl: "https://code-beat.dev/o/r/pull/1"
+    });
+
+    assert.match(body, /\*\*What this PR does:\*\* Adds loyalty points accrual and burn for checkout\./);
+    assert.match(body, /View the full report and diff/);
+  });
 });
 
 describe("formatInlineComment", () => {
