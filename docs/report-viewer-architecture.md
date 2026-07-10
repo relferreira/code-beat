@@ -195,6 +195,26 @@ When `report: true`, the action runs a dedicated overview model call (same OpenR
 key/model as the review) after the review completes. If that call fails, a deterministic
 fallback is built from the PR title, body, and file list so publish still succeeds.
 
+## PR write actions (viewer)
+
+The viewer can act as a full GitHub PR client (not just read reports). Mutations use the
+**signed-in user's** GitHub token on the Worker (same privacy model as reads: tokens on
+server, no repo content stored).
+
+| Capability | API | UI |
+| --- | --- | --- |
+| Conversation comment | `POST …/issues/{n}/comments` | Conversation tab composer |
+| Review (approve / request changes / comment) | `POST …/pulls/{n}/reviews` | Review panel (Conversation + Files) |
+| Inline review comments (batched with review) | review `comments[]` | Files → “Add review comment” drafts |
+| Merge / squash / rebase | `PUT …/pulls/{n}/merge` | Merge box on Conversation |
+
+**GitHub App permissions required for write:** Pull requests **Read and write**, Contents
+**Read and write** (merge). View-only still works with read scopes.
+
+Not yet: click-to-comment on diff lines, labels/assignees/reviewers, close/reopen, update
+branch, checks tab, reactions, edit title/body. Those can land as follow-ups on the same
+mutation pattern (`/api/pr/...` + Worker proxy).
+
 ## Action inputs (opt-in)
 
 | input           | default              | meaning                                                        |

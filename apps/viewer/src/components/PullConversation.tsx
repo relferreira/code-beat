@@ -1,7 +1,18 @@
 import type { ReactNode } from "react";
 import { Markdown } from "./Markdown";
+import { CommentComposer } from "./pr/CommentComposer";
+import { MergeBox } from "./pr/MergeBox";
+import { ReviewPanel } from "./pr/ReviewPanel";
 import { relativeTime } from "../lib/format";
-import type { IssueComment, PullCommit, PullDetail, PullReview, ReviewComment } from "../report/types";
+import type { MergeMethod, ReviewEvent } from "../lib/pr-actions";
+import type {
+  DraftReviewComment,
+  IssueComment,
+  PullCommit,
+  PullDetail,
+  PullReview,
+  ReviewComment,
+} from "../report/types";
 
 type TimelineItem =
   | { kind: "opened"; at: string; pull: PullDetail }
@@ -11,8 +22,8 @@ type TimelineItem =
   | { kind: "reviewComment"; at: string; comment: ReviewComment };
 
 /**
- * GitHub-style conversation tab: description, then a chronological timeline of
- * commits, reviews, and comments.
+ * GitHub-style conversation tab: description, timeline, comment composer,
+ * review actions, and merge box.
  */
 export function PullConversation({
   pull,
@@ -20,69 +31,106 @@ export function PullConversation({
   issueComments,
   reviews,
   reviewComments,
+  draftComments,
+  onRemoveDraft,
+  onPostComment,
+  onSubmitReview,
+  onMerge,
 }: {
   pull: PullDetail;
   commits: PullCommit[];
   issueComments: IssueComment[];
   reviews: PullReview[];
   reviewComments: ReviewComment[];
+  draftComments: DraftReviewComment[];
+  onRemoveDraft: (id: string) => void;
+  onPostComment: (body: string) => Promise<void>;
+  onSubmitReview: (args: { event: ReviewEvent; body: string }) => Promise<void>;
+  onMerge: (args: {
+    mergeMethod: MergeMethod;
+    commitTitle?: string;
+    commitMessage?: string;
+  }) => Promise<void>;
 }) {
   const body = pull.body.trim();
   const timeline = buildTimeline({ pull, commits, issueComments, reviews, reviewComments });
+  const actionsDisabled = pull.state === "closed" || pull.merged;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      {/* Description card */}
-      <section className="overflow-hidden rounded-2xl border border-border bg-surface">
-        <div className="flex items-center gap-3 border-b border-border px-4 py-3">
-          <Avatar name={pull.author} src={pull.authorAvatar} />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm text-fg">
-              <span className="font-semibold">{pull.author}</span>
-              <span className="text-fg-3"> opened this pull request </span>
-              <span className="text-fg-3" title={pull.createdAt}>
-                {relativeTime(pull.createdAt)}
-              </span>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0 space-y-6">
+        {/* Description card */}
+        <section className="overflow-hidden rounded-2xl border border-border bg-surface">
+          <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+            <Avatar name={pull.author} src={pull.authorAvatar} />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-fg">
+                <span className="font-semibold">{pull.author}</span>
+                <span className="text-fg-3"> opened this pull request </span>
+                <span className="text-fg-3" title={pull.createdAt}>
+                  {relativeTime(pull.createdAt)}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="p-4">
-          {body ? (
-            <Markdown className="text-sm text-fg-2">{body}</Markdown>
-          ) : (
-            <p className="text-sm text-fg-3">No description provided.</p>
-          )}
-        </div>
-      </section>
+          <div className="p-4">
+            {body ? (
+              <Markdown className="text-sm text-fg-2">{body}</Markdown>
+            ) : (
+              <p className="text-sm text-fg-3">No description provided.</p>
+            )}
+          </div>
+        </section>
 
-      {/* Meta strip */}
-      <div className="flex flex-wrap gap-2 text-xs text-fg-3">
-        <MetaChip>
-          {commits.length} {commits.length === 1 ? "commit" : "commits"}
-        </MetaChip>
-        <MetaChip>
-          {issueComments.length} conversation {issueComments.length === 1 ? "comment" : "comments"}
-        </MetaChip>
-        <MetaChip>
-          {reviews.length} {reviews.length === 1 ? "review" : "reviews"}
-        </MetaChip>
-        <MetaChip>
-          {reviewComments.length} inline {reviewComments.length === 1 ? "comment" : "comments"}
-        </MetaChip>
+        <div className="flex flex-wrap gap-2 text-xs text-fg-3">
+          <MetaChip>
+            {commits.length} {commits.length === 1 ? "commit" : "commits"}
+          </MetaChip>
+          <MetaChip>
+            {issueComments.length} conversation {issueComments.length === 1 ? "comment" : "comments"}
+          </MetaChip>
+          <MetaChip>
+            {reviews.length} {reviews.length === 1 ? "review" : "reviews"}
+          </MetaChip>
+          <MetaChip>
+            {reviewComments.length} inline {reviewComments.length === 1 ? "comment" : "comments"}
+          </MetaChip>
+        </div>
+
+        <div className="relative space-y-0">
+          <div className="absolute top-2 bottom-2 left-[15px] w-px bg-border" aria-hidden />
+          <ul className="space-y-4">
+            {timeline.map((item) => (
+              <li key={timelineKey(item)} className="relative pl-10">
+                <TimelineDot kind={item.kind} />
+                <TimelineEntry item={item} />
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {!actionsDisabled ? (
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-fg-3">Add a comment</h3>
+            <CommentComposer
+              placeholder="Leave a comment on this pull request…"
+              submitLabel="Comment"
+              onSubmit={onPostComment}
+            />
+          </div>
+        ) : null}
       </div>
 
-      {/* Timeline */}
-      <div className="relative space-y-0">
-        <div className="absolute top-2 bottom-2 left-[15px] w-px bg-border" aria-hidden />
-        <ul className="space-y-4">
-          {timeline.map((item) => (
-            <li key={timelineKey(item)} className="relative pl-10">
-              <TimelineDot kind={item.kind} />
-              <TimelineEntry item={item} />
-            </li>
-          ))}
-        </ul>
-      </div>
+      <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+        {!actionsDisabled ? (
+          <ReviewPanel
+            draftComments={draftComments}
+            onRemoveDraft={onRemoveDraft}
+            onSubmit={onSubmitReview}
+          />
+        ) : null}
+        <MergeBox pull={pull} onMerge={onMerge} />
+      </aside>
     </div>
   );
 }
@@ -150,12 +198,7 @@ function TimelineDot({ kind }: { kind: TimelineItem["kind"] }) {
     review: "bg-brand",
     reviewComment: "bg-warn",
   };
-  return (
-    <span
-      className={`absolute top-2 left-2 size-3 rounded-full ${styles[kind]}`}
-      aria-hidden
-    />
-  );
+  return <span className={`absolute top-2 left-2 size-3 rounded-full ${styles[kind]}`} aria-hidden />;
 }
 
 function TimelineEntry({ item }: { item: TimelineItem }) {
@@ -172,7 +215,15 @@ function TimelineEntry({ item }: { item: TimelineItem }) {
     case "commit":
       return <CommitCard commit={item.commit} />;
     case "issueComment":
-      return <CommentCard author={item.comment.author} avatar={item.comment.authorAvatar} at={item.comment.createdAt} body={item.comment.body} href={item.comment.htmlUrl} />;
+      return (
+        <CommentCard
+          author={item.comment.author}
+          avatar={item.comment.authorAvatar}
+          at={item.comment.createdAt}
+          body={item.comment.body}
+          href={item.comment.htmlUrl}
+        />
+      );
     case "review":
       return <ReviewCard review={item.review} />;
     case "reviewComment":
@@ -239,12 +290,7 @@ function ReviewCard({ review }: { review: PullReview }) {
         <span className="text-xs text-fg-3" title={review.submittedAt}>
           {relativeTime(review.submittedAt)}
         </span>
-        <a
-          href={review.htmlUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-auto text-xs text-fg-3 hover:text-fg"
-        >
+        <a href={review.htmlUrl} target="_blank" rel="noreferrer" className="ml-auto text-xs text-fg-3 hover:text-fg">
           View ↗
         </a>
       </div>
@@ -311,9 +357,7 @@ function reviewStateStyle(state: string): { label: string; className: string } {
 }
 
 function MetaChip({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-fg-2">{children}</span>
-  );
+  return <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-fg-2">{children}</span>;
 }
 
 function Avatar({ name, src, size = "md" }: { name: string; src?: string; size?: "sm" | "md" }) {

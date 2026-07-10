@@ -22,8 +22,11 @@ export interface PullViewData {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number) {
-    super(`API ${status}`);
+  constructor(
+    public status: number,
+    message?: string,
+  ) {
+    super(message ?? `API ${status}`);
     this.name = "ApiError";
   }
 }

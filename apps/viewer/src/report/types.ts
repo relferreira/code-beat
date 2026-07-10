@@ -83,6 +83,14 @@ export interface PullDetail {
   state: "open" | "closed";
   merged: boolean;
   draft: boolean;
+  /** null while GitHub is still computing mergeability. */
+  mergeable: boolean | null;
+  rebaseable: boolean | null;
+  /** dirty | blocked | clean | unstable | behind | draft | unknown … */
+  mergeableState: string;
+  allowMergeCommit: boolean;
+  allowSquashMerge: boolean;
+  allowRebaseMerge: boolean;
   baseRef: string;
   headRef: string;
   /** Used to fetch whole-file contents for full-context diffs. */
@@ -95,6 +103,15 @@ export interface PullDetail {
   createdAt: string;
   updatedAt: string;
   htmlUrl: string;
+}
+
+/** Client-side draft of an inline review comment before the review is submitted. */
+export interface DraftReviewComment {
+  id: string;
+  path: string;
+  line: number;
+  side: "LEFT" | "RIGHT";
+  body: string;
 }
 
 /** An inline review comment on a diff line (includes Code Beat's own posted comments). */

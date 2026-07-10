@@ -31,10 +31,18 @@ export async function requireGitHubToken(request: Request): Promise<TokenResult>
   }
 }
 
-/** Map a GitHub failure onto a client-safe status: 404 passes through, everything else is 502. */
+/** Map a GitHub failure onto a client-safe status, including the GitHub message when available. */
 export function githubErrorResponse(error: unknown): Response {
   if (error instanceof GitHubError) {
-    return Response.json({ error: "github_error" }, { status: error.status === 404 ? 404 : 502 });
+    const status =
+      error.status === 404
+        ? 404
+        : error.status === 403 || error.status === 401
+          ? error.status
+          : error.status === 422 || error.status === 405 || error.status === 409
+            ? error.status
+            : 502;
+    return Response.json({ error: "github_error", message: error.message }, { status });
   }
   return Response.json({ error: "internal_error" }, { status: 500 });
 }

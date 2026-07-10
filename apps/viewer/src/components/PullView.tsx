@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { CenterMessage } from "./CenterMessage";
 import { PullConversation } from "./PullConversation";
 import { PullFiles } from "./PullFiles";
@@ -7,7 +7,8 @@ import type { FileSource } from "../report/FileCard";
 import { ApiError, fetchPullView, type PullViewData } from "../report/api";
 import { usePulls } from "../lib/data";
 import { SCORE_DOT, scoreTone } from "../lib/format";
-import type { PullDetail, Report } from "../report/types";
+import { mergePull, postIssueComment, postPullReview, type MergeMethod, type ReviewEvent } from "../lib/pr-actions";
+import type { DraftReviewComment, PullDetail, Report } from "../report/types";
 
 type Tab = "report" | "conversation" | "files";
 
@@ -19,16 +20,25 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready"; data: PullViewData };
 
-/** The PR viewer: Report first, then GitHub-style conversation, then files. */
+/** The PR viewer: Report first, then conversation (with write actions), then files. */
 export function PullView({ owner, repo, number }: { owner: string; repo: string; number?: number }) {
   const { pulls, loading: pullsLoading } = usePulls(owner, repo);
   const selected = number ?? pulls[0]?.number;
   const [state, setState] = useState<State>({ status: "loading" });
-  // null = follow the default (report when it exists), otherwise the user's explicit choice.
   const [tab, setTab] = useState<Tab | null>(null);
+  const [draftComments, setDraftComments] = useState<DraftReviewComment[]>([]);
+  const [flash, setFlash] = useState<string | null>(null);
 
   useEffect(() => {
     setTab(null);
+    setDraftComments([]);
+    setFlash(null);
+  }, [owner, repo, selected]);
+
+  const reload = useCallback(async () => {
+    if (selected == null) return;
+    const data = await fetchPullView(owner, repo, selected);
+    setState({ status: "ready", data });
   }, [owner, repo, selected]);
 
   useEffect(() => {
@@ -69,16 +79,67 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
   const { pull, files, report, comments, commits, issueComments, reviews } = state.data;
   const activeTab: Tab = tab ?? (report ? "report" : "conversation");
   const source: FileSource = { owner, repo, baseSha: pull.baseSha, headSha: pull.headSha };
+  const prNumber = pull.number;
+
+  async function handlePostComment(body: string) {
+    await postIssueComment(owner, repo, prNumber, body);
+    setFlash("Comment posted.");
+    await reload();
+  }
+
+  async function handleSubmitReview(args: { event: ReviewEvent; body: string }) {
+    await postPullReview(owner, repo, prNumber, {
+      event: args.event,
+      body: args.body,
+      commitId: pull.headSha,
+      comments: draftComments,
+    });
+    setDraftComments([]);
+    const label =
+      args.event === "APPROVE" ? "Approved" : args.event === "REQUEST_CHANGES" ? "Changes requested" : "Review submitted";
+    setFlash(label);
+    await reload();
+  }
+
+  async function handleMerge(args: {
+    mergeMethod: MergeMethod;
+    commitTitle?: string;
+    commitMessage?: string;
+  }) {
+    await mergePull(owner, repo, prNumber, {
+      ...args,
+      sha: pull.headSha,
+    });
+    setFlash("Pull request merged.");
+    await reload();
+  }
+
+  function addDraft(draft: Omit<DraftReviewComment, "id">) {
+    setDraftComments((prev) => [
+      ...prev,
+      { ...draft, id: `${draft.path}:${draft.side}:${draft.line}:${Date.now()}` },
+    ]);
+    setFlash("Comment added to pending review.");
+  }
 
   return (
     <div className="w-full px-6 py-8">
       <PullHeader owner={owner} repo={repo} pull={pull} />
+      {flash ? (
+        <div className="mt-3 rounded-lg border border-good/30 bg-good/10 px-3 py-2 text-sm text-good">
+          {flash}
+          <button type="button" className="ml-2 text-xs underline" onClick={() => setFlash(null)}>
+            dismiss
+          </button>
+        </div>
+      ) : null}
       <Tabs
         active={activeTab}
         onChange={setTab}
         report={report}
         commitCount={commits.length || pull.commits}
         fileCount={files.length || pull.changedFiles}
+        draftCount={draftComments.length}
       />
 
       <div className="mt-6">
@@ -98,9 +159,23 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
             issueComments={issueComments}
             reviews={reviews}
             reviewComments={comments}
+            draftComments={draftComments}
+            onRemoveDraft={(id) => setDraftComments((prev) => prev.filter((d) => d.id !== id))}
+            onPostComment={handlePostComment}
+            onSubmitReview={handleSubmitReview}
+            onMerge={handleMerge}
           />
         ) : (
-          <PullFiles pull={pull} files={files} comments={comments} source={source} />
+          <PullFiles
+            pull={pull}
+            files={files}
+            comments={comments}
+            source={source}
+            draftComments={draftComments}
+            onAddDraft={addDraft}
+            onRemoveDraft={(id) => setDraftComments((prev) => prev.filter((d) => d.id !== id))}
+            onSubmitReview={handleSubmitReview}
+          />
         )}
       </div>
     </div>
@@ -169,12 +244,14 @@ function Tabs({
   report,
   commitCount,
   fileCount,
+  draftCount,
 }: {
   active: Tab;
   onChange: (tab: Tab) => void;
   report: Report | null;
   commitCount: number;
   fileCount: number;
+  draftCount: number;
 }) {
   const tone = report ? scoreTone(report.review.score) : null;
 
@@ -196,6 +273,11 @@ function Tabs({
       <TabButton active={active === "files"} onClick={() => onChange("files")}>
         Files
         {fileCount > 0 ? <span className="ml-1.5 text-xs text-fg-3">{fileCount}</span> : null}
+        {draftCount > 0 ? (
+          <span className="ml-1.5 rounded-full bg-brand/15 px-1.5 text-[10px] font-medium text-brand">
+            {draftCount} draft
+          </span>
+        ) : null}
       </TabButton>
     </div>
   );

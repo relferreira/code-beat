@@ -34,19 +34,45 @@ export interface RepoRef {
   number: number;
 }
 
-async function ghFetch(path: string, token: string, accept = "application/vnd.github+json"): Promise<Response> {
+async function ghFetch(
+  path: string,
+  token: string,
+  accept = "application/vnd.github+json",
+  init?: RequestInit,
+): Promise<Response> {
   const res = await fetch(`${API}${path}`, {
+    ...init,
     headers: {
       Accept: accept,
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": USER_AGENT,
       Authorization: `Bearer ${token}`,
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
     },
   });
   if (!res.ok) {
-    throw new GitHubError(res.status, `GitHub ${res.status} for ${path}`);
+    let detail = `GitHub ${res.status} for ${path}`;
+    try {
+      const body = (await res.json()) as { message?: string; errors?: Array<{ message?: string }> };
+      if (body.message) {
+        const extras = body.errors?.map((e) => e.message).filter(Boolean).join("; ");
+        detail = extras ? `${body.message} (${extras})` : body.message;
+      }
+    } catch {
+      // keep default detail
+    }
+    throw new GitHubError(res.status, detail);
   }
   return res;
+}
+
+async function ghJson<T>(path: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await ghFetch(path, token, "application/vnd.github+json", init);
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return (await res.json()) as T;
 }
 
 /**
@@ -182,8 +208,11 @@ interface PullDetailResponse {
   state: string;
   draft?: boolean;
   merged?: boolean;
+  mergeable?: boolean | null;
+  rebaseable?: boolean | null;
+  mergeable_state?: string;
   user?: { login?: string; avatar_url?: string } | null;
-  base: { ref: string; sha: string };
+  base: { ref: string; sha: string; repo?: { allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean } };
   head: { ref: string; sha: string };
   additions: number;
   deletions: number;
@@ -195,8 +224,28 @@ interface PullDetailResponse {
 }
 
 async function getPullRequest(ref: RepoRef, token: string): Promise<PullDetail> {
-  const res = await ghFetch(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token);
-  const pr = (await res.json()) as PullDetailResponse;
+  const pr = await ghJson<PullDetailResponse>(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, token);
+  // Repo merge method flags aren't always on the PR payload; fetch repo when needed for open PRs.
+  let allowMergeCommit = pr.base.repo?.allow_merge_commit;
+  let allowSquashMerge = pr.base.repo?.allow_squash_merge;
+  let allowRebaseMerge = pr.base.repo?.allow_rebase_merge;
+  if (allowMergeCommit === undefined || allowSquashMerge === undefined || allowRebaseMerge === undefined) {
+    try {
+      const repo = await ghJson<{
+        allow_merge_commit?: boolean;
+        allow_squash_merge?: boolean;
+        allow_rebase_merge?: boolean;
+      }>(`/repos/${ref.owner}/${ref.repo}`, token);
+      allowMergeCommit = repo.allow_merge_commit ?? true;
+      allowSquashMerge = repo.allow_squash_merge ?? true;
+      allowRebaseMerge = repo.allow_rebase_merge ?? true;
+    } catch {
+      allowMergeCommit = true;
+      allowSquashMerge = true;
+      allowRebaseMerge = true;
+    }
+  }
+
   return {
     number: pr.number,
     title: pr.title,
@@ -206,6 +255,12 @@ async function getPullRequest(ref: RepoRef, token: string): Promise<PullDetail> 
     state: pr.state === "closed" ? "closed" : "open",
     merged: Boolean(pr.merged),
     draft: Boolean(pr.draft),
+    mergeable: pr.mergeable ?? null,
+    rebaseable: pr.rebaseable ?? null,
+    mergeableState: pr.mergeable_state ?? "unknown",
+    allowMergeCommit: Boolean(allowMergeCommit),
+    allowSquashMerge: Boolean(allowSquashMerge),
+    allowRebaseMerge: Boolean(allowRebaseMerge),
     baseRef: pr.base.ref,
     headRef: pr.head.ref,
     baseSha: pr.base.sha,
@@ -217,6 +272,145 @@ async function getPullRequest(ref: RepoRef, token: string): Promise<PullDetail> 
     createdAt: pr.created_at,
     updatedAt: pr.updated_at,
     htmlUrl: pr.html_url,
+  };
+}
+
+// --- Mutations (user token, write scopes required on the GitHub App) ---
+
+export async function createIssueComment(
+  ref: RepoRef,
+  token: string,
+  body: string,
+): Promise<IssueComment> {
+  const comment = await ghJson<IssueCommentResponse>(
+    `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments`,
+    token,
+    { method: "POST", body: JSON.stringify({ body }) },
+  );
+  return {
+    id: comment.id,
+    author: comment.user?.login ?? "unknown",
+    authorAvatar: comment.user?.avatar_url,
+    body: comment.body,
+    createdAt: comment.created_at,
+    htmlUrl: comment.html_url,
+  };
+}
+
+export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
+
+export interface ReviewCommentInput {
+  path: string;
+  body: string;
+  line: number;
+  side?: "LEFT" | "RIGHT";
+}
+
+export async function createPullReview(
+  ref: RepoRef,
+  token: string,
+  args: {
+    body?: string;
+    event: ReviewEvent;
+    commitId?: string;
+    comments?: ReviewCommentInput[];
+  },
+): Promise<PullReview> {
+  const payload: Record<string, unknown> = {
+    event: args.event,
+  };
+  if (args.body?.trim()) payload.body = args.body.trim();
+  if (args.commitId) payload.commit_id = args.commitId;
+  if (args.comments && args.comments.length > 0) {
+    payload.comments = args.comments.map((c) => ({
+      path: c.path,
+      body: c.body,
+      line: c.line,
+      side: c.side ?? "RIGHT",
+    }));
+  }
+
+  const review = await ghJson<ReviewResponse>(
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  return {
+    id: review.id,
+    author: review.user?.login ?? "unknown",
+    authorAvatar: review.user?.avatar_url,
+    state: review.state,
+    body: review.body ?? "",
+    submittedAt: review.submitted_at ?? new Date().toISOString(),
+    htmlUrl: review.html_url,
+  };
+}
+
+export type MergeMethod = "merge" | "squash" | "rebase";
+
+export async function mergePullRequest(
+  ref: RepoRef,
+  token: string,
+  args: {
+    mergeMethod: MergeMethod;
+    commitTitle?: string;
+    commitMessage?: string;
+    sha?: string;
+  },
+): Promise<{ sha: string; merged: boolean; message: string }> {
+  const payload: Record<string, unknown> = {
+    merge_method: args.mergeMethod,
+  };
+  if (args.commitTitle?.trim()) payload.commit_title = args.commitTitle.trim();
+  if (args.commitMessage?.trim()) payload.commit_message = args.commitMessage.trim();
+  if (args.sha) payload.sha = args.sha;
+
+  return ghJson(`/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/merge`, token, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createReviewComment(
+  ref: RepoRef,
+  token: string,
+  args: {
+    body: string;
+    path: string;
+    line: number;
+    side?: "LEFT" | "RIGHT";
+    commitId: string;
+    inReplyTo?: number;
+  },
+): Promise<ReviewComment> {
+  const payload: Record<string, unknown> = {
+    body: args.body,
+    path: args.path,
+    line: args.line,
+    side: args.side ?? "RIGHT",
+    commit_id: args.commitId,
+  };
+  if (args.inReplyTo) payload.in_reply_to = args.inReplyTo;
+
+  const comment = await ghJson<ReviewCommentResponse>(
+    `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/comments`,
+    token,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+  const line = comment.line ?? comment.original_line;
+  if (line == null) {
+    throw new GitHubError(422, "Created review comment has no line");
+  }
+  return {
+    id: comment.id,
+    path: comment.path,
+    line,
+    side: comment.side === "LEFT" ? "LEFT" : "RIGHT",
+    body: comment.body,
+    author: comment.user?.login ?? "unknown",
+    authorAvatar: comment.user?.avatar_url,
+    createdAt: comment.created_at,
+    htmlUrl: comment.html_url,
   };
 }
 

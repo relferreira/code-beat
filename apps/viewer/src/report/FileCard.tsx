@@ -1,10 +1,11 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Markdown } from "../components/Markdown";
+import { DraftCommentForm } from "../components/pr/DraftCommentForm";
 import { SEVERITY, relativeTime } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { fetchFileContents } from "./api";
 import type { CommentAnnotation } from "./DiffPane";
-import type { ReportFinding, ReviewComment, ViewerFile } from "./types";
+import type { DraftReviewComment, ReportFinding, ReviewComment, ViewerFile } from "./types";
 
 const DiffPane = lazy(() => import("./DiffPane"));
 
@@ -21,12 +22,16 @@ export function FileCard({
   file,
   findings,
   comments,
+  draftComments,
   source,
+  onAddDraft,
 }: {
   file: ViewerFile;
   findings?: ReportFinding[];
   comments?: ReviewComment[];
+  draftComments?: DraftReviewComment[];
   source?: FileSource;
+  onAddDraft?: (draft: Omit<DraftReviewComment, "id">) => void;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -90,6 +95,29 @@ export function FileCard({
           ) : null}
         </div>
       </div>
+
+      {onAddDraft || (draftComments && draftComments.length > 0) ? (
+        <div className="border-b border-border px-4 py-2">
+          {draftComments && draftComments.length > 0 ? (
+            <ul className="mb-2 space-y-1">
+              {draftComments.map((d) => (
+                <li key={d.id} className="rounded-md bg-brand/8 px-2 py-1 text-xs text-fg-2">
+                  <span className="font-mono text-fg-3">
+                    L{d.line} ({d.side})
+                  </span>
+                  : {d.body}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {onAddDraft ? (
+            <DraftCommentForm
+              path={file.path}
+              onAdd={(args) => onAddDraft({ path: args.path, line: args.line, side: args.side, body: args.body })}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {findings?.length ? (
         <ul className="divide-y divide-border border-b border-border">

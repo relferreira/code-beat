@@ -68,10 +68,14 @@ browser ↔ GitHub — the Worker only mints a short-lived token.
 1. **Register a GitHub App** (Settings → Developer settings → GitHub Apps → New):
    - **Callback URL:** `<BETTER_AUTH_URL>/api/auth/callback/github`
      (e.g. `https://code-beat.relferreira.workers.dev/api/auth/callback/github`)
-   - **Permissions (read-only):** Repository → *Contents*, *Pull requests*; Account → *Email addresses*
+   - **Permissions (for full PR workflow):** Repository → *Contents* **Read and write**,
+     *Pull requests* **Read and write**, *Metadata* Read; Account → *Email addresses*
+     - Read-only still works for viewing; **write is required** to comment, review
+       (approve / request changes), and merge/squash/rebase from the viewer.
    - Enable **Request user authorization (OAuth) during installation**.
    - Copy the **Client ID**, generate a **Client secret**, and **Install** the App on the
-     repos/orgs you want to view.
+     repos/orgs you want to view. After raising permissions, re-accept the permission
+     prompt on each installation.
 2. **Create D1:** `wrangler d1 create code-beat-viewer` → put the `database_id` in the
    `d1_databases` block in `wrangler.jsonc` (already set for this repo's deployment).
 3. **Set secrets** (`wrangler secret put <NAME>` or dashboard):
