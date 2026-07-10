@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CenterMessage } from "./CenterMessage";
+import { PullConversation } from "./PullConversation";
 import { PullFiles } from "./PullFiles";
 import { ReportPanel } from "../report/ReportPanel";
 import type { FileSource } from "../report/FileCard";
@@ -8,7 +9,7 @@ import { usePulls } from "../lib/data";
 import { SCORE_DOT, scoreTone } from "../lib/format";
 import type { PullDetail, Report } from "../report/types";
 
-type Tab = "pr" | "report";
+type Tab = "report" | "conversation" | "files";
 
 type State =
   | { status: "loading" }
@@ -18,7 +19,7 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready"; data: PullViewData };
 
-/** The PR viewer: GitHub-style pull request tab + Code Beat report tab. */
+/** The PR viewer: Report first, then GitHub-style conversation, then files. */
 export function PullView({ owner, repo, number }: { owner: string; repo: string; number?: number }) {
   const { pulls, loading: pullsLoading } = usePulls(owner, repo);
   const selected = number ?? pulls[0]?.number;
@@ -65,14 +66,20 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
   }
   if (state.status === "error") return <CenterMessage>Could not load pull request: {state.message}</CenterMessage>;
 
-  const { pull, files, report, comments } = state.data;
-  const activeTab: Tab = tab ?? (report ? "report" : "pr");
+  const { pull, files, report, comments, commits, issueComments, reviews } = state.data;
+  const activeTab: Tab = tab ?? (report ? "report" : "conversation");
   const source: FileSource = { owner, repo, baseSha: pull.baseSha, headSha: pull.headSha };
 
   return (
     <div className="w-full px-6 py-8">
       <PullHeader owner={owner} repo={repo} pull={pull} />
-      <Tabs active={activeTab} onChange={setTab} report={report} />
+      <Tabs
+        active={activeTab}
+        onChange={setTab}
+        report={report}
+        commitCount={commits.length || pull.commits}
+        fileCount={files.length || pull.changedFiles}
+      />
 
       <div className="mt-6">
         {activeTab === "report" ? (
@@ -84,6 +91,14 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
               enabled.
             </div>
           )
+        ) : activeTab === "conversation" ? (
+          <PullConversation
+            pull={pull}
+            commits={commits}
+            issueComments={issueComments}
+            reviews={reviews}
+            reviewComments={comments}
+          />
         ) : (
           <PullFiles pull={pull} files={files} comments={comments} source={source} />
         )}
@@ -118,7 +133,8 @@ function PullHeader({ owner, repo, pull }: { owner: string; repo: string; pull: 
         </span>
         <span>·</span>
         <span>
-          <span className="text-good">+{pull.additions}</span> <span className="text-sev-blocker">&minus;{pull.deletions}</span>
+          <span className="text-good">+{pull.additions}</span>{" "}
+          <span className="text-sev-blocker">&minus;{pull.deletions}</span>
         </span>
         <span>·</span>
         <span>
@@ -151,18 +167,19 @@ function Tabs({
   active,
   onChange,
   report,
+  commitCount,
+  fileCount,
 }: {
   active: Tab;
   onChange: (tab: Tab) => void;
   report: Report | null;
+  commitCount: number;
+  fileCount: number;
 }) {
   const tone = report ? scoreTone(report.review.score) : null;
 
   return (
-    <div className="mt-6 flex gap-1 border-b border-border">
-      <TabButton active={active === "pr"} onClick={() => onChange("pr")}>
-        Pull request
-      </TabButton>
+    <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
       <TabButton active={active === "report"} onClick={() => onChange("report")}>
         Report
         {tone ? (
@@ -171,6 +188,14 @@ function Tabs({
             {report!.review.score}/5
           </span>
         ) : null}
+      </TabButton>
+      <TabButton active={active === "conversation"} onClick={() => onChange("conversation")}>
+        Conversation
+        {commitCount > 0 ? <span className="ml-1.5 text-xs text-fg-3">{commitCount}</span> : null}
+      </TabButton>
+      <TabButton active={active === "files"} onClick={() => onChange("files")}>
+        Files
+        {fileCount > 0 ? <span className="ml-1.5 text-xs text-fg-3">{fileCount}</span> : null}
       </TabButton>
     </div>
   );
@@ -183,7 +208,7 @@ function TabButton({
 }: {
   active: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <button

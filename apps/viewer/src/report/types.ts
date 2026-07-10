@@ -111,6 +111,37 @@ export interface ReviewComment {
   htmlUrl: string;
 }
 
+/** A commit on the pull request. */
+export interface PullCommit {
+  sha: string;
+  message: string;
+  author: string;
+  authorAvatar?: string;
+  committedAt: string;
+  htmlUrl: string;
+}
+
+/** A conversation (issue) comment on the PR — not an inline review comment. */
+export interface IssueComment {
+  id: number;
+  author: string;
+  authorAvatar?: string;
+  body: string;
+  createdAt: string;
+  htmlUrl: string;
+}
+
+/** A submitted PR review (approve / request changes / comment). */
+export interface PullReview {
+  id: number;
+  author: string;
+  authorAvatar?: string;
+  state: string;
+  body: string;
+  submittedAt: string;
+  htmlUrl: string;
+}
+
 /** One open pull request, for the sidebar list. */
 export interface PullSummary {
   number: number;

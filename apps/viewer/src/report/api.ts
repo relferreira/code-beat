@@ -1,4 +1,14 @@
-import type { PullDetail, PullSummary, RepoSummary, Report, ReviewComment, ViewerFile } from "./types";
+import type {
+  IssueComment,
+  PullCommit,
+  PullDetail,
+  PullReview,
+  PullSummary,
+  RepoSummary,
+  Report,
+  ReviewComment,
+  ViewerFile,
+} from "./types";
 
 export interface PullViewData {
   pull: PullDetail;
@@ -6,6 +16,9 @@ export interface PullViewData {
   /** null when Code Beat hasn't reviewed this PR yet. */
   report: Report | null;
   comments: ReviewComment[];
+  commits: PullCommit[];
+  issueComments: IssueComment[];
+  reviews: PullReview[];
 }
 
 export class ApiError extends Error {

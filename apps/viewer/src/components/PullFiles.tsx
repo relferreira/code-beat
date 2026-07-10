@@ -1,11 +1,10 @@
 import { useMemo } from "react";
-import { Markdown } from "./Markdown";
 import { FileCard, type FileSource } from "../report/FileCard";
 import type { PullDetail, ReviewComment, ViewerFile } from "../report/types";
 
 /**
- * Pull request tab: the description plus every changed file's diff, with review comments
- * threaded inline on their lines — the GitHub view.
+ * Files tab: every changed file's diff with inline review comments.
+ * Description and conversation live on the Conversation tab.
  */
 export function PullFiles({
   pull,
@@ -18,21 +17,11 @@ export function PullFiles({
   comments: ReviewComment[];
   source: FileSource;
 }) {
-  const body = pull.body.trim();
   const commentsByPath = useMemo(() => groupByPath(comments), [comments]);
 
   return (
     <div>
-      <section className="rounded-xl border border-border bg-surface p-4">
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-fg-3">Description</div>
-        {body ? (
-          <Markdown className="text-sm text-fg-2">{body}</Markdown>
-        ) : (
-          <p className="text-sm text-fg-3">No description provided.</p>
-        )}
-      </section>
-
-      <div className="mt-6 flex items-center justify-between">
+      <div className="flex items-center justify-between">
         <h2 className="text-sm font-medium text-fg">
           {files.length} changed {files.length === 1 ? "file" : "files"}
           {comments.length > 0 ? (

@@ -1,4 +1,14 @@
-import type { PullDetail, PullSummary, RepoSummary, Report, ReviewComment, ViewerFile } from "../report/types";
+import type {
+  IssueComment,
+  PullCommit,
+  PullDetail,
+  PullReview,
+  PullSummary,
+  RepoSummary,
+  Report,
+  ReviewComment,
+  ViewerFile,
+} from "../report/types";
 
 // Server-side GitHub client. Runs on the Worker with the visitor's server-held token, so
 // repo content is a stateless pass-through and no GitHub token reaches the browser.
@@ -213,27 +223,136 @@ async function getPullRequest(ref: RepoRef, token: string): Promise<PullDetail> 
 export interface PullViewData {
   pull: PullDetail;
   files: ViewerFile[];
-  /** null when Code Beat hasn't reviewed this PR yet — the PR tab still renders. */
+  /** null when Code Beat hasn't reviewed this PR yet — conversation + files still render. */
   report: Report | null;
+  /** Inline review comments for the Files tab. */
   comments: ReviewComment[];
+  commits: PullCommit[];
+  issueComments: IssueComment[];
+  reviews: PullReview[];
 }
 
 /**
  * Everything the PR viewer needs, in one round trip. A missing report is not an error:
- * the GitHub-style PR tab must work for un-reviewed PRs.
+ * conversation and files tabs must work for un-reviewed PRs.
  */
 export async function loadPullView(ref: RepoRef, token: string): Promise<PullViewData> {
-  const [pull, files, report, comments] = await Promise.all([
+  const [pull, files, report, comments, commits, issueComments, reviews] = await Promise.all([
     getPullRequest(ref, token),
     fetchPullFiles(ref, token),
     fetchReport(ref, token).catch((error: unknown) => {
       if (error instanceof GitHubError && error.status === 404) return null;
       throw error;
     }),
-    // Comments are a nicety: never fail the whole view over them.
+    // Conversation extras are a nicety: never fail the whole view over them.
     listReviewComments(ref, token).catch(() => [] as ReviewComment[]),
+    listPullCommits(ref, token).catch(() => [] as PullCommit[]),
+    listIssueComments(ref, token).catch(() => [] as IssueComment[]),
+    listPullReviews(ref, token).catch(() => [] as PullReview[]),
   ]);
-  return { pull, files, report, comments };
+  return { pull, files, report, comments, commits, issueComments, reviews };
+}
+
+interface CommitResponse {
+  sha: string;
+  html_url: string;
+  commit: {
+    message: string;
+    author?: { name?: string; date?: string } | null;
+    committer?: { date?: string } | null;
+  };
+  author?: { login?: string; avatar_url?: string } | null;
+  committer?: { login?: string; avatar_url?: string } | null;
+}
+
+async function listPullCommits(ref: RepoRef, token: string): Promise<PullCommit[]> {
+  const commits: PullCommit[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const res = await ghFetch(
+      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/commits?per_page=100&page=${page}`,
+      token,
+    );
+    const batch = (await res.json()) as CommitResponse[];
+    for (const commit of batch) {
+      const message = commit.commit.message ?? "";
+      commits.push({
+        sha: commit.sha,
+        message,
+        author: commit.author?.login ?? commit.commit.author?.name ?? "unknown",
+        authorAvatar: commit.author?.avatar_url ?? commit.committer?.avatar_url,
+        committedAt: commit.commit.author?.date ?? commit.commit.committer?.date ?? "",
+        htmlUrl: commit.html_url,
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return commits;
+}
+
+interface IssueCommentResponse {
+  id: number;
+  body: string;
+  user?: { login?: string; avatar_url?: string } | null;
+  created_at: string;
+  html_url: string;
+}
+
+async function listIssueComments(ref: RepoRef, token: string): Promise<IssueComment[]> {
+  const comments: IssueComment[] = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const res = await ghFetch(
+      `/repos/${ref.owner}/${ref.repo}/issues/${ref.number}/comments?per_page=100&page=${page}`,
+      token,
+    );
+    const batch = (await res.json()) as IssueCommentResponse[];
+    for (const comment of batch) {
+      comments.push({
+        id: comment.id,
+        author: comment.user?.login ?? "unknown",
+        authorAvatar: comment.user?.avatar_url,
+        body: comment.body,
+        createdAt: comment.created_at,
+        htmlUrl: comment.html_url,
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return comments;
+}
+
+interface ReviewResponse {
+  id: number;
+  body: string | null;
+  state: string;
+  user?: { login?: string; avatar_url?: string } | null;
+  submitted_at: string | null;
+  html_url: string;
+}
+
+async function listPullReviews(ref: RepoRef, token: string): Promise<PullReview[]> {
+  const reviews: PullReview[] = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const res = await ghFetch(
+      `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/reviews?per_page=100&page=${page}`,
+      token,
+    );
+    const batch = (await res.json()) as ReviewResponse[];
+    for (const review of batch) {
+      // PENDING reviews have no submission timestamp and clutter the timeline.
+      if (!review.submitted_at) continue;
+      reviews.push({
+        id: review.id,
+        author: review.user?.login ?? "unknown",
+        authorAvatar: review.user?.avatar_url,
+        state: review.state,
+        body: review.body ?? "",
+        submittedAt: review.submitted_at,
+        htmlUrl: review.html_url,
+      });
+    }
+    if (batch.length < 100) break;
+  }
+  return reviews;
 }
 
 interface RepoListResponse {
