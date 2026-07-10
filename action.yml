@@ -55,8 +55,9 @@ inputs:
     default: ""
   report:
     description: >-
-      Generate a self-contained review report, commit it to the report branch, and add a
-      link to the review comment. Off by default. Requires contents write permission.
+      Generate a PR report (bird's-eye overview of what the PR does, major decisions,
+      plus review score/findings), commit it to the report branch, and add a viewer link
+      to the review comment. Off by default. Requires contents write permission.
     required: false
     default: "false"
   report-branch:

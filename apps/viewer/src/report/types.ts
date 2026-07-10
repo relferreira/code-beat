@@ -12,6 +12,14 @@ export interface ReportFinding {
   posted: boolean;
 }
 
+/** Bird's-eye narrative of the PR (schema v2+). Optional for older reports. */
+export interface PrOverview {
+  headline: string;
+  body: string;
+  majorDecisions: string[];
+  areas: string[];
+}
+
 export interface Report {
   schemaVersion: number;
   generatedAt: string;
@@ -26,6 +34,8 @@ export interface Report {
     baseSha: string;
     headSha: string;
   };
+  /** Present on schema v2+ reports generated with the overview step. */
+  overview?: PrOverview;
   review: {
     score: number;
     summary: string;

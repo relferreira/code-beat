@@ -2,6 +2,7 @@ import * as github from "@actions/github";
 import { getInput, setFailed, setOutput } from "./action-core.js";
 import { formatInlineComment, formatReviewBody } from "./format.js";
 import { parseModelListValue } from "./model-list.js";
+import { generatePrOverview } from "./pr-overview.js";
 import { buildReport, buildViewerUrl, publishReport } from "./report.js";
 import { reviewPullRequest } from "./review.js";
 import type { PullRequestFile } from "./diff.js";
@@ -149,6 +150,25 @@ async function run(): Promise<void> {
       // Best-effort: a report failure must never fail the review.
       try {
         viewerUrl = buildViewerUrl(viewerBaseUrl, repoOwner, repoName, number);
+        const prFiles = files.map(toPullRequestFile);
+        const overview = await generatePrOverview({
+          apiKey,
+          model,
+          retryPolicy: {
+            maxAttempts: retryMaxAttempts,
+            delayMs: retryDelayMs,
+            backoffFactor: retryBackoffFactor
+          },
+          owner: repoOwner,
+          repo: repoName,
+          prNumber: number,
+          title: pullRequest.title,
+          body: pullRequest.body ?? "",
+          author: pullRequest.user?.login ?? "unknown",
+          baseRef: pullRequest.base.ref,
+          headRef: pullRequest.head.ref,
+          files: prFiles
+        });
         const report = buildReport({
           toolName: "code-beat",
           toolVersion: TOOL_VERSION,
@@ -164,6 +184,7 @@ async function run(): Promise<void> {
             baseSha: pullRequest.base.sha,
             headSha: pullRequest.head.sha
           },
+          overview,
           review
         });
         await publishReport(client, { owner: repoOwner, repo: repoName, branch: reportBranch, report });

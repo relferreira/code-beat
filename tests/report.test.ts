@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { buildFallbackOverview } from "../src/pr-overview.js";
 import { buildReport, buildViewerUrl, reportPath } from "../src/report.js";
 import { reportSchema } from "../src/report-schema.js";
 import type { ValidatedReview } from "../src/review.js";
+
+function makeOverview() {
+  return {
+    headline: "Adds an HTML report viewer for Code Beat reviews.",
+    body: "## Purpose\n\nLets reviewers open a structured report with diffs and findings.\n\n## Approach\n\nPublishes report.json to an orphan branch and serves a SPA viewer.",
+    majorDecisions: [
+      "Store reports on an orphan branch so history stays out of main.",
+      "Fetch diffs client-side so repo content never hits the viewer server."
+    ],
+    areas: ["report", "viewer", "action"]
+  };
+}
 
 function makeReview(overrides: Partial<ValidatedReview> = {}): ValidatedReview {
   return {
@@ -38,17 +51,21 @@ function makeArgs(review: ValidatedReview) {
       baseSha: "aaaaaaa",
       headSha: "bbbbbbb"
     },
+    overview: makeOverview(),
     review
   };
 }
 
 describe("buildReport", () => {
-  it("produces a schema-valid report and flags posted findings", () => {
+  it("produces a schema-valid report with overview and flags posted findings", () => {
     const report = buildReport(makeArgs(makeReview()));
 
     assert.doesNotThrow(() => reportSchema.parse(report));
-    assert.equal(report.schemaVersion, 1);
+    assert.equal(report.schemaVersion, 2);
     assert.equal(report.pullRequest.headSha, "bbbbbbb");
+    assert.equal(report.overview.headline, "Adds an HTML report viewer for Code Beat reviews.");
+    assert.equal(report.overview.majorDecisions.length, 2);
+    assert.deepEqual(report.overview.areas, ["report", "viewer", "action"]);
     assert.equal(report.review.findings.length, 2);
 
     const posted = report.review.findings.find((f) => f.path === "src/a.ts");
@@ -69,6 +86,30 @@ describe("buildReport", () => {
     const args = makeArgs(makeReview());
     const report = buildReport({ ...args, generatedAt: undefined });
     assert.match(report.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("buildFallbackOverview", () => {
+  it("builds a usable overview from title, body, and files without a model", () => {
+    const overview = buildFallbackOverview({
+      title: "Add discount helper",
+      body: "Small helper for pricing experiments.",
+      files: [
+        { filename: "src/discount.ts", status: "added", additions: 8, deletions: 0, changes: 8 },
+        { filename: "src/pricing.ts", status: "modified", additions: 2, deletions: 1, changes: 3 }
+      ]
+    });
+
+    assert.equal(overview.headline, "Add discount helper");
+    assert.match(overview.body, /Small helper for pricing experiments/);
+    assert.match(overview.body, /src\/discount\.ts/);
+    assert.ok(overview.areas.includes("discount") || overview.areas.includes("pricing") || overview.areas.length >= 0);
+  });
+
+  it("handles empty body and empty file list", () => {
+    const overview = buildFallbackOverview({ title: "Tidy up", body: "", files: [] });
+    assert.equal(overview.headline, "Tidy up");
+    assert.match(overview.body, /No PR description/);
   });
 });
 

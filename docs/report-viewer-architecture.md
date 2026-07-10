@@ -126,11 +126,14 @@ and summaries*; we are custodians of *auth tokens only*. This is the unavoidable
 "click the link from the PR comment, in a cold browser, and it just works." Minimal
 permissions + self-hostability are the mitigations.
 
-## `report.json` schema (v1 sketch)
+## `report.json` schema (v2)
+
+The report is primarily a **bird's-eye view of the PR** (what it does, major decisions),
+with the code-review score and findings attached for the annotated diff view.
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "generatedAt": "2026-07-07T12:00:00.000Z",
   "tool": { "name": "code-beat", "version": "0.1.0" },
   "repo": { "owner": "relferreira", "name": "code-beat" },
@@ -143,9 +146,18 @@ permissions + self-hostability are the mitigations.
     "baseSha": "abc…",   // viewer fetches the exact diff from these SHAs
     "headSha": "def…"
   },
+  "overview": {
+    "headline": "One-line description of what this PR does",
+    "body": "Markdown bird's-eye narrative: purpose, approach, scope…",
+    "majorDecisions": [
+      "Store reports on an orphan branch…",
+      "Fetch diffs client-side…"
+    ],
+    "areas": ["report", "viewer", "action"]
+  },
   "review": {
     "score": 4,
-    "summary": "…",
+    "summary": "…",          // finding-oriented review summary
     "model": "deepseek/deepseek-v4-flash",
     "truncatedDiff": false,
     "skippedCommentCount": 0,
@@ -162,6 +174,10 @@ permissions + self-hostability are the mitigations.
   }
 }
 ```
+
+When `report: true`, the action runs a dedicated overview model call (same OpenRouter
+key/model as the review) after the review completes. If that call fails, a deterministic
+fallback is built from the PR title, body, and file list so publish still succeeds.
 
 ## Action inputs (opt-in)
 

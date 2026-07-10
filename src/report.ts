@@ -1,5 +1,11 @@
 import type { getOctokit } from "@actions/github";
-import { REPORT_SCHEMA_VERSION, reportSchema, type Report, type ReportFinding } from "./report-schema.js";
+import {
+  REPORT_SCHEMA_VERSION,
+  reportSchema,
+  type PrOverview,
+  type Report,
+  type ReportFinding
+} from "./report-schema.js";
 import type { ReviewFinding } from "./schema.js";
 import type { ValidatedReview } from "./review.js";
 
@@ -21,13 +27,15 @@ export interface BuildReportArgs {
     baseSha: string;
     headSha: string;
   };
+  /** Bird's-eye narrative of the PR (purpose, approach, major decisions). */
+  overview: PrOverview;
   review: ValidatedReview;
 }
 
 /**
- * Build the typed report.json payload from a completed review. Pure: no I/O.
- * Every finding in the review result is included, flagged with whether it was
- * posted as an inline comment.
+ * Build the typed report.json payload from a completed review + PR overview.
+ * Pure: no I/O. Every finding in the review result is included, flagged with
+ * whether it was posted as an inline comment.
  */
 export function buildReport(args: BuildReportArgs): Report {
   const postedKeys = new Set(args.review.comments.map(findingKey));
@@ -50,6 +58,7 @@ export function buildReport(args: BuildReportArgs): Report {
       baseSha: args.pullRequest.baseSha,
       headSha: args.pullRequest.headSha
     },
+    overview: args.overview,
     review: {
       score: args.review.result.score,
       summary: args.review.result.summary,
