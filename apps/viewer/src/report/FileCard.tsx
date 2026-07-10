@@ -1,10 +1,11 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import type { SelectedLineRange } from "@pierre/diffs/react";
 import { Markdown } from "../components/Markdown";
-import { DraftCommentForm } from "../components/pr/DraftCommentForm";
+import { InlineCommentComposer } from "../components/pr/InlineCommentComposer";
 import { SEVERITY, relativeTime } from "../lib/format";
 import { useTheme } from "../lib/theme";
 import { fetchFileContents } from "./api";
-import type { CommentAnnotation } from "./DiffPane";
+import type { AnnotationMeta, CommentAnnotation, LineSide } from "./DiffPane";
 import type { DraftReviewComment, ReportFinding, ReviewComment, ViewerFile } from "./types";
 
 const DiffPane = lazy(() => import("./DiffPane"));
@@ -41,9 +42,59 @@ export function FileCard({
   const [contents, setContents] = useState<{ old: string; new: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** Open inline composer target (from the gutter + button). */
+  const [composing, setComposing] = useState<{ line: number; side: LineSide } | null>(null);
 
-  const annotations = useMemo(() => (comments?.length ? buildAnnotations(comments) : undefined), [comments]);
   const canExpand = Boolean(source) && Boolean(file.patch);
+  const canComment = Boolean(onAddDraft);
+
+  const annotations = useMemo(
+    () => buildAnnotations(comments, draftComments, composing),
+    [comments, draftComments, composing],
+  );
+
+  const handleGutterUtilityClick = useCallback(
+    (range: SelectedLineRange) => {
+      if (!onAddDraft) return;
+      const line = range.end;
+      const annotationSide = range.endSide ?? range.side ?? "additions";
+      const side: LineSide = annotationSide === "deletions" ? "LEFT" : "RIGHT";
+      setComposing({ line, side });
+    },
+    [onAddDraft],
+  );
+
+  const renderAnnotation = useCallback(
+    (annotation: CommentAnnotation) => {
+      const meta = annotation.metadata;
+      if (meta.kind === "composer") {
+        return (
+          <div>
+            {meta.existing && (meta.existing.comments.length > 0 || meta.existing.drafts.length > 0) ? (
+              <CommentThread comments={meta.existing.comments} drafts={meta.existing.drafts} />
+            ) : null}
+            <InlineCommentComposer
+              path={file.path}
+              line={meta.line}
+              side={meta.side}
+              onCancel={() => setComposing(null)}
+              onSubmit={(body) => {
+                onAddDraft?.({
+                  path: file.path,
+                  line: meta.line,
+                  side: meta.side,
+                  body,
+                });
+                setComposing(null);
+              }}
+            />
+          </div>
+        );
+      }
+      return <CommentThread comments={meta.comments} drafts={meta.drafts} />;
+    },
+    [file.path, onAddDraft],
+  );
 
   async function toggleFullFile() {
     if (showFullFile) {
@@ -59,7 +110,6 @@ export function FileCard({
     setLoading(true);
     setFailed(false);
     try {
-      // Added files have no base version; removed files have no head version.
       const [oldContents, newContents] = await Promise.all([
         file.status === "added"
           ? Promise.resolve("")
@@ -77,11 +127,18 @@ export function FileCard({
     }
   }
 
+  const draftCount = draftComments?.length ?? 0;
+
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <span className="truncate font-mono text-xs text-fg">{file.path}</span>
         <div className="flex shrink-0 items-center gap-3">
+          {draftCount > 0 ? (
+            <span className="rounded-full bg-brand/12 px-2 py-0.5 text-[11px] font-medium text-brand">
+              {draftCount} pending
+            </span>
+          ) : null}
           {failed ? <span className="text-xs text-sev-blocker">Couldn&apos;t load file</span> : null}
           <span className="text-xs text-fg-3">{file.status}</span>
           {canExpand ? (
@@ -96,26 +153,10 @@ export function FileCard({
         </div>
       </div>
 
-      {onAddDraft || (draftComments && draftComments.length > 0) ? (
-        <div className="border-b border-border px-4 py-2">
-          {draftComments && draftComments.length > 0 ? (
-            <ul className="mb-2 space-y-1">
-              {draftComments.map((d) => (
-                <li key={d.id} className="rounded-md bg-brand/8 px-2 py-1 text-xs text-fg-2">
-                  <span className="font-mono text-fg-3">
-                    L{d.line} ({d.side})
-                  </span>
-                  : {d.body}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {onAddDraft ? (
-            <DraftCommentForm
-              path={file.path}
-              onAdd={(args) => onAddDraft({ path: args.path, line: args.line, side: args.side, body: args.body })}
-            />
-          ) : null}
+      {canComment ? (
+        <div className="border-b border-border bg-surface-2 px-4 py-1.5 text-[11px] text-fg-3">
+          Hover a line number and click <span className="font-semibold text-fg-2">+</span> to comment —
+          then submit the review from the sidebar.
         </div>
       ) : null}
 
@@ -139,7 +180,8 @@ export function FileCard({
                 oldContents={contents.old}
                 newContents={contents.new}
                 annotations={annotations}
-                renderAnnotation={renderCommentThread}
+                renderAnnotation={renderAnnotation}
+                onGutterUtilityClick={canComment ? handleGutterUtilityClick : undefined}
               />
             ) : (
               <DiffPane
@@ -147,7 +189,8 @@ export function FileCard({
                 fileName={file.path}
                 patch={file.patch}
                 annotations={annotations}
-                renderAnnotation={renderCommentThread}
+                renderAnnotation={renderAnnotation}
+                onGutterUtilityClick={canComment ? handleGutterUtilityClick : undefined}
               />
             )}
           </Suspense>
@@ -159,32 +202,72 @@ export function FileCard({
   );
 }
 
-/** Group comments onto one annotation per (side, line) so a thread renders as a single block. */
-function buildAnnotations(comments: ReviewComment[]): CommentAnnotation[] {
-  const byLine = new Map<string, ReviewComment[]>();
-  for (const comment of comments) {
+function buildAnnotations(
+  comments: ReviewComment[] | undefined,
+  drafts: DraftReviewComment[] | undefined,
+  composing: { line: number; side: LineSide } | null,
+): CommentAnnotation[] {
+  const byLine = new Map<string, { comments: ReviewComment[]; drafts: DraftReviewComment[] }>();
+
+  for (const comment of comments ?? []) {
     const side = comment.side === "LEFT" ? "deletions" : "additions";
     const key = `${side}:${comment.line}`;
-    const bucket = byLine.get(key);
-    if (bucket) bucket.push(comment);
-    else byLine.set(key, [comment]);
+    const bucket = byLine.get(key) ?? { comments: [], drafts: [] };
+    bucket.comments.push(comment);
+    byLine.set(key, bucket);
   }
 
-  return [...byLine.entries()].map(([key, thread]) => {
+  for (const draft of drafts ?? []) {
+    const side = draft.side === "LEFT" ? "deletions" : "additions";
+    const key = `${side}:${draft.line}`;
+    const bucket = byLine.get(key) ?? { comments: [], drafts: [] };
+    bucket.drafts.push(draft);
+    byLine.set(key, bucket);
+  }
+
+  const annotations: CommentAnnotation[] = [...byLine.entries()].map(([key, thread]) => {
     const [side, line] = key.split(":");
     return {
       side: side as "deletions" | "additions",
       lineNumber: Number(line),
-      metadata: thread,
+      metadata: { kind: "thread" as const, comments: thread.comments, drafts: thread.drafts },
     };
   });
+
+  if (composing) {
+    const side = composing.side === "LEFT" ? "deletions" : "additions";
+    const existingIdx = annotations.findIndex((a) => a.side === side && a.lineNumber === composing.line);
+    const existingMeta =
+      existingIdx >= 0 && annotations[existingIdx]!.metadata.kind === "thread"
+        ? annotations[existingIdx]!.metadata
+        : undefined;
+    const composer: CommentAnnotation = {
+      side,
+      lineNumber: composing.line,
+      metadata: {
+        kind: "composer",
+        line: composing.line,
+        side: composing.side,
+        existing:
+          existingMeta && existingMeta.kind === "thread"
+            ? { comments: existingMeta.comments, drafts: existingMeta.drafts }
+            : undefined,
+      },
+    };
+    if (existingIdx >= 0) annotations[existingIdx] = composer;
+    else annotations.push(composer);
+  }
+
+  return annotations;
 }
 
-function renderCommentThread(annotation: CommentAnnotation) {
-  return <CommentThread comments={annotation.metadata} />;
-}
-
-function CommentThread({ comments }: { comments: ReviewComment[] }) {
+function CommentThread({
+  comments,
+  drafts,
+}: {
+  comments: ReviewComment[];
+  drafts: DraftReviewComment[];
+}) {
   return (
     <div
       className="space-y-3 border-y border-border bg-surface px-4 py-3"
@@ -211,6 +294,12 @@ function CommentThread({ comments }: { comments: ReviewComment[] }) {
             </div>
             <Markdown className="mt-1 text-[13px] text-fg-2">{comment.body}</Markdown>
           </div>
+        </div>
+      ))}
+      {drafts.map((draft) => (
+        <div key={draft.id} className="rounded-lg border border-brand/25 bg-brand/8 px-3 py-2">
+          <div className="text-[11px] font-medium text-brand">Pending review comment</div>
+          <p className="mt-1 text-[13px] text-fg-2 whitespace-pre-wrap">{draft.body}</p>
         </div>
       ))}
     </div>
