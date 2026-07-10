@@ -2,6 +2,7 @@ import type { getOctokit } from "@actions/github";
 import {
   REPORT_SCHEMA_VERSION,
   reportSchema,
+  type ChangeStats,
   type PrOverview,
   type Report,
   type ReportFinding
@@ -29,6 +30,8 @@ export interface BuildReportArgs {
   };
   /** Bird's-eye narrative of the PR (purpose, approach, major decisions). */
   overview: PrOverview;
+  /** Diff size summary for visual charts (not the full diff). */
+  changeStats: ChangeStats;
   review: ValidatedReview;
 }
 
@@ -59,6 +62,7 @@ export function buildReport(args: BuildReportArgs): Report {
       headSha: args.pullRequest.headSha
     },
     overview: args.overview,
+    changeStats: args.changeStats,
     review: {
       score: args.review.result.score,
       summary: args.review.result.summary,
@@ -71,6 +75,15 @@ export function buildReport(args: BuildReportArgs): Report {
 
   // Validate our own output so a schema drift fails loudly instead of shipping a bad report.
   return reportSchema.parse(report);
+}
+
+/** Aggregate +/−/file counts for the report's visual stats strip. */
+export function buildChangeStats(files: Array<{ additions: number; deletions: number }>): ChangeStats {
+  return {
+    filesChanged: files.length,
+    additions: files.reduce((sum, file) => sum + file.additions, 0),
+    deletions: files.reduce((sum, file) => sum + file.deletions, 0)
+  };
 }
 
 function findingKey(finding: ReviewFinding): string {

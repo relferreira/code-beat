@@ -3,17 +3,24 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createRetryableModel, error, httpStatus } from "ai-retry/language-model";
 import { z } from "zod";
 import { buildDiffContext, type PullRequestFile } from "./diff.js";
-import { prOverviewSchema, type PrOverview } from "./report-schema.js";
+import { prOverviewSchema, type PrOverview, type ReportDiagram } from "./report-schema.js";
 import type { RetryPolicy } from "./review.js";
 
 const OVERVIEW_TIMEOUT_MS = 90_000;
 const MAX_OVERVIEW_DIFF_CHARS = 80_000;
 
+const looseDiagramSchema = z.object({
+  title: z.string(),
+  caption: z.string().optional(),
+  mermaid: z.string()
+});
+
 const looseOverviewSchema = z.object({
   headline: z.string(),
   body: z.string(),
   majorDecisions: z.array(z.string()).default([]),
-  areas: z.array(z.string()).default([])
+  areas: z.array(z.string()).default([]),
+  diagrams: z.array(looseDiagramSchema).default([])
 });
 
 export interface GeneratePrOverviewInput {
@@ -55,7 +62,7 @@ export async function generatePrOverview(input: GeneratePrOverviewInput): Promis
       output: aiOutput.object({
         schema: looseOverviewSchema,
         name: "pr_overview",
-        description: "Bird's-eye pull request overview: purpose, approach, and major decisions."
+        description: "Bird's-eye pull request overview: purpose, approach, major decisions, and diagrams."
       }),
       system: OVERVIEW_SYSTEM_PROMPT,
       prompt: buildOverviewPrompt(input, diffContext.prompt, diffContext.truncated)
@@ -65,7 +72,8 @@ export async function generatePrOverview(input: GeneratePrOverviewInput): Promis
     console.log(
       `Code Beat PR overview complete in ${Date.now() - startedAt}ms: ` +
         `headline chars=${overview.headline.length}, body chars=${overview.body.length}, ` +
-        `decisions=${overview.majorDecisions.length}, areas=${overview.areas.length}`
+        `decisions=${overview.majorDecisions.length}, areas=${overview.areas.length}, ` +
+        `diagrams=${overview.diagrams.length}`
     );
     return overview;
   } catch (error) {
@@ -104,30 +112,41 @@ export function buildFallbackOverview(input: {
     headline,
     body: truncate(bodyParts.join("\n\n"), 8000),
     majorDecisions: [],
-    areas
+    areas,
+    diagrams: buildFallbackDiagrams(input.files, areas)
   });
 }
 
 const OVERVIEW_SYSTEM_PROMPT = `You write pull request overviews for engineering readers.
 
 Your job is a bird's-eye report on the PR itself — not a code review and not a list of bugs.
+The report is rendered as a visual dashboard (metrics, Mermaid diagrams, decision cards). Your
+structured fields power that UI.
 
 Focus on:
 1. **What this PR does** — the purpose and user/system-facing outcome.
 2. **Big picture** — how the pieces fit together; architecture or data-flow when relevant.
-3. **Major decisions** — intentional design/implementation choices visible in the change (APIs, abstractions, trade-offs, migrations, feature flags, etc.).
+3. **Major decisions** — intentional design/implementation choices visible in the change.
 4. **Scope** — what areas are in and out of this change.
+5. **Diagrams** — at least one Mermaid diagram when the change has structure worth showing
+   (data flow, module relationships, request path, state machine, migration steps). Skip only
+   if the PR is a pure rename/typo with no architecture.
 
 Rules:
 - Write for a teammate who has not opened the diff yet.
-- Be concrete and grounded in the title, description, and diff. Do not invent features that are not evidenced.
-- Prefer clarity over marketing tone. No fluff, no "this PR aims to…".
+- Be concrete and grounded in the title, description, and diff. Do not invent features.
+- Prefer clarity over marketing tone. No fluff.
 - Do not list line-level nits, style comments, or review findings.
 - Do not restate the entire diff file-by-file; synthesize.
-- Use markdown in \`body\` (short sections with headings are good).
+- Use markdown in \`body\` (short sections with headings). Do NOT put mermaid fences in body —
+  put diagrams in the \`diagrams\` array instead.
 - \`headline\` is a single sentence (no markdown), max ~200 chars.
 - \`majorDecisions\` are short bullets (one decision each); empty array if none are clear.
-- \`areas\` are short labels for components/domains touched (e.g. "checkout", "auth middleware").`;
+- \`areas\` are short labels for components/domains touched.
+- \`diagrams\` (0–3): each has title, optional caption, and valid Mermaid source.
+  Prefer flowchart TD or sequenceDiagram. Keep diagrams small (≤12 nodes). Use simple
+  node ids (A, B, Auth, Pricing). No HTML/JS in mermaid. Avoid special characters that
+  break Mermaid (use quotes for labels with spaces/parens).`;
 
 function buildOverviewPrompt(
   input: GeneratePrOverviewInput,
@@ -160,13 +179,68 @@ function normalizeOverview(value: unknown): PrOverview {
   const areas = Array.isArray(input.areas)
     ? uniqueAreas(input.areas.map((item) => truncate(String(item), 80)).filter(Boolean))
     : [];
+  const diagrams = Array.isArray(input.diagrams)
+    ? input.diagrams.map(normalizeDiagram).filter((d): d is ReportDiagram => d !== undefined).slice(0, 3)
+    : [];
 
   return prOverviewSchema.parse({
     headline: truncate(String(input.headline ?? "Pull request changes"), 240),
     body: truncate(String(input.body ?? "No overview available."), 8000),
     majorDecisions: majorDecisions.slice(0, 12),
-    areas: areas.slice(0, 20)
+    areas: areas.slice(0, 20),
+    diagrams
   });
+}
+
+function normalizeDiagram(value: unknown): ReportDiagram | undefined {
+  if (value === null || typeof value !== "object") {
+    return undefined;
+  }
+
+  const input = value as Record<string, unknown>;
+  const mermaid = String(input.mermaid ?? "").trim();
+  const title = String(input.title ?? "").trim();
+  if (!mermaid || !title) {
+    return undefined;
+  }
+
+  const captionRaw = input.caption !== undefined ? String(input.caption).trim() : undefined;
+  return {
+    title: truncate(title, 120),
+    ...(captionRaw ? { caption: truncate(captionRaw, 400) } : {}),
+    mermaid: truncate(mermaid, 5000)
+  };
+}
+
+function buildFallbackDiagrams(files: PullRequestFile[], areas: string[]): ReportDiagram[] {
+  if (files.length === 0) {
+    return [];
+  }
+
+  const nodes = (areas.length > 0 ? areas : files.map((f) => f.filename.split("/").pop() ?? f.filename))
+    .slice(0, 6)
+    .map((label, index) => {
+      const id = `N${index}`;
+      const safe = label.replace(/["[\]]/g, "");
+      return { id, safe };
+    });
+
+  if (nodes.length === 0) {
+    return [];
+  }
+
+  const lines = ["flowchart LR", '  PR["This PR"]'];
+  for (const node of nodes) {
+    lines.push(`  PR --> ${node.id}["${node.safe}"]`);
+  }
+
+  return [
+    {
+      title: "Areas touched",
+      caption: "Fallback diagram from changed paths (model overview was unavailable).",
+      mermaid: lines.join("\n")
+    }
+  ];
 }
 
 function createOverviewModel(
@@ -204,7 +278,6 @@ function areaFromPath(path: string): string | undefined {
     return parts[0]?.replace(/\.[^.]+$/, "") || undefined;
   }
 
-  // Prefer first meaningful directory (skip generic roots).
   const skip = new Set(["src", "lib", "app", "apps", "packages", "test", "tests", "dist"]);
   for (const part of parts.slice(0, -1)) {
     if (!skip.has(part.toLowerCase())) {

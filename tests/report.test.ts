@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildFallbackOverview } from "../src/pr-overview.js";
-import { buildReport, buildViewerUrl, reportPath } from "../src/report.js";
+import { buildChangeStats, buildReport, buildViewerUrl, reportPath } from "../src/report.js";
 import { reportSchema } from "../src/report-schema.js";
 import type { ValidatedReview } from "../src/review.js";
 
@@ -13,7 +13,14 @@ function makeOverview() {
       "Store reports on an orphan branch so history stays out of main.",
       "Fetch diffs client-side so repo content never hits the viewer server."
     ],
-    areas: ["report", "viewer", "action"]
+    areas: ["report", "viewer", "action"],
+    diagrams: [
+      {
+        title: "Report data flow",
+        caption: "Action writes report; viewer reads it from the orphan branch.",
+        mermaid: "flowchart LR\n  A[Action] --> B[report.json]\n  B --> C[Viewer]"
+      }
+    ]
   };
 }
 
@@ -52,20 +59,23 @@ function makeArgs(review: ValidatedReview) {
       headSha: "bbbbbbb"
     },
     overview: makeOverview(),
+    changeStats: { filesChanged: 4, additions: 120, deletions: 30 },
     review
   };
 }
 
 describe("buildReport", () => {
-  it("produces a schema-valid report with overview and flags posted findings", () => {
+  it("produces a schema-valid report with overview, diagrams, and stats", () => {
     const report = buildReport(makeArgs(makeReview()));
 
     assert.doesNotThrow(() => reportSchema.parse(report));
-    assert.equal(report.schemaVersion, 2);
+    assert.equal(report.schemaVersion, 3);
     assert.equal(report.pullRequest.headSha, "bbbbbbb");
     assert.equal(report.overview.headline, "Adds an HTML report viewer for Code Beat reviews.");
     assert.equal(report.overview.majorDecisions.length, 2);
-    assert.deepEqual(report.overview.areas, ["report", "viewer", "action"]);
+    assert.equal(report.overview.diagrams.length, 1);
+    assert.match(report.overview.diagrams[0]!.mermaid, /flowchart/);
+    assert.deepEqual(report.changeStats, { filesChanged: 4, additions: 120, deletions: 30 });
     assert.equal(report.review.findings.length, 2);
 
     const posted = report.review.findings.find((f) => f.path === "src/a.ts");
@@ -89,8 +99,20 @@ describe("buildReport", () => {
   });
 });
 
+describe("buildChangeStats", () => {
+  it("sums additions and deletions across files", () => {
+    assert.deepEqual(
+      buildChangeStats([
+        { additions: 10, deletions: 2 },
+        { additions: 5, deletions: 1 }
+      ]),
+      { filesChanged: 2, additions: 15, deletions: 3 }
+    );
+  });
+});
+
 describe("buildFallbackOverview", () => {
-  it("builds a usable overview from title, body, and files without a model", () => {
+  it("builds a usable overview with a fallback diagram from title, body, and files", () => {
     const overview = buildFallbackOverview({
       title: "Add discount helper",
       body: "Small helper for pricing experiments.",
@@ -103,13 +125,15 @@ describe("buildFallbackOverview", () => {
     assert.equal(overview.headline, "Add discount helper");
     assert.match(overview.body, /Small helper for pricing experiments/);
     assert.match(overview.body, /src\/discount\.ts/);
-    assert.ok(overview.areas.includes("discount") || overview.areas.includes("pricing") || overview.areas.length >= 0);
+    assert.ok(overview.diagrams.length >= 1);
+    assert.match(overview.diagrams[0]!.mermaid, /flowchart/);
   });
 
   it("handles empty body and empty file list", () => {
     const overview = buildFallbackOverview({ title: "Tidy up", body: "", files: [] });
     assert.equal(overview.headline, "Tidy up");
     assert.match(overview.body, /No PR description/);
+    assert.deepEqual(overview.diagrams, []);
   });
 });
 

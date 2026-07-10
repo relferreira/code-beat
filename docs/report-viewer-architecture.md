@@ -126,14 +126,18 @@ and summaries*; we are custodians of *auth tokens only*. This is the unavoidable
 "click the link from the PR comment, in a cold browser, and it just works." Minimal
 permissions + self-hostability are the mitigations.
 
-## `report.json` schema (v2)
+## `report.json` schema (v3)
 
-The report is primarily a **bird's-eye view of the PR** (what it does, major decisions),
-with the code-review score and findings attached for the annotated diff view.
+The report is a **visual bird's-eye view of the PR** (what it does, major decisions,
+diagrams, change stats). Diffs live on the **PR tab**, not the report tab.
+
+We deliberately do **not** use freeform MDX from the model: arbitrary JSX is a security
+and reliability risk. Instead the model fills a **typed JSON contract**; the viewer maps
+fields onto React components (metrics, Mermaid, charts, decision cards).
 
 ```jsonc
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "generatedAt": "2026-07-07T12:00:00.000Z",
   "tool": { "name": "code-beat", "version": "0.1.0" },
   "repo": { "owner": "relferreira", "name": "code-beat" },
@@ -143,7 +147,7 @@ with the code-review score and findings attached for the annotated diff view.
     "author": "relferreira",
     "baseRef": "main",
     "headRef": "feature/report",
-    "baseSha": "abc…",   // viewer fetches the exact diff from these SHAs
+    "baseSha": "abc…",
     "headSha": "def…"
   },
   "overview": {
@@ -153,11 +157,23 @@ with the code-review score and findings attached for the annotated diff view.
       "Store reports on an orphan branch…",
       "Fetch diffs client-side…"
     ],
-    "areas": ["report", "viewer", "action"]
+    "areas": ["report", "viewer", "action"],
+    "diagrams": [
+      {
+        "title": "Report data flow",
+        "caption": "Optional short caption",
+        "mermaid": "flowchart LR\n  A[Action] --> B[report.json]\n  B --> C[Viewer]"
+      }
+    ]
+  },
+  "changeStats": {
+    "filesChanged": 12,
+    "additions": 400,
+    "deletions": 80
   },
   "review": {
     "score": 4,
-    "summary": "…",          // finding-oriented review summary
+    "summary": "…",
     "model": "deepseek/deepseek-v4-flash",
     "truncatedDiff": false,
     "skippedCommentCount": 0,
@@ -165,10 +181,10 @@ with the code-review score and findings attached for the annotated diff view.
       {
         "path": "src/example.ts",
         "line": 12,
-        "severity": "major",   // blocker | major | minor
+        "severity": "major",
         "title": "Missing guard",
         "body": "…",
-        "posted": true          // was it posted as an inline comment
+        "posted": true
       }
     ]
   }

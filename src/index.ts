@@ -3,7 +3,7 @@ import { getInput, setFailed, setOutput } from "./action-core.js";
 import { formatInlineComment, formatReviewBody } from "./format.js";
 import { parseModelListValue } from "./model-list.js";
 import { generatePrOverview } from "./pr-overview.js";
-import { buildReport, buildViewerUrl, publishReport } from "./report.js";
+import { buildChangeStats, buildReport, buildViewerUrl, publishReport } from "./report.js";
 import { reviewPullRequest } from "./review.js";
 import type { PullRequestFile } from "./diff.js";
 import type { PullRequestReviewThreadContext } from "./review.js";
@@ -186,6 +186,7 @@ async function run(): Promise<void> {
             headSha: pullRequest.head.sha
           },
           overview: reportOverview,
+          changeStats: buildChangeStats(prFiles),
           review
         });
         await publishReport(client, { owner: repoOwner, repo: repoName, branch: reportBranch, report });

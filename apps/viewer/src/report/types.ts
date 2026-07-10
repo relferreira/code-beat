@@ -12,12 +12,27 @@ export interface ReportFinding {
   posted: boolean;
 }
 
+/** Architecture / flow diagram (Mermaid source). Schema v3+. */
+export interface ReportDiagram {
+  title: string;
+  caption?: string;
+  mermaid: string;
+}
+
 /** Bird's-eye narrative of the PR (schema v2+). Optional for older reports. */
 export interface PrOverview {
   headline: string;
   body: string;
   majorDecisions: string[];
   areas: string[];
+  /** Present on schema v3+. */
+  diagrams?: ReportDiagram[];
+}
+
+export interface ChangeStats {
+  filesChanged: number;
+  additions: number;
+  deletions: number;
 }
 
 export interface Report {
@@ -36,6 +51,8 @@ export interface Report {
   };
   /** Present on schema v2+ reports generated with the overview step. */
   overview?: PrOverview;
+  /** Present on schema v3+ for the stats strip / charts. */
+  changeStats?: ChangeStats;
   review: {
     score: number;
     summary: string;

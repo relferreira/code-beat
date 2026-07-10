@@ -77,7 +77,7 @@ export function PullView({ owner, repo, number }: { owner: string; repo: string;
       <div className="mt-6">
         {activeTab === "report" ? (
           report ? (
-            <ReportPanel report={report} files={files} source={source} />
+            <ReportPanel report={report} />
           ) : (
             <div className="rounded-xl border border-border bg-surface px-4 py-10 text-center text-sm text-fg-3">
               No Code Beat report for this pull request yet. It appears once the review action runs with report

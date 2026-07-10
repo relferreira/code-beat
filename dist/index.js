@@ -75687,12 +75687,21 @@ const reviewSchema = object({
  * Version of the report.json contract. Bump when the shape changes in a way the
  * viewer must branch on. The viewer reads this before rendering.
  *
- * v2: adds pull-request overview (bird's-eye narrative + major decisions).
+ * v2: pull-request overview (bird's-eye narrative + major decisions).
+ * v3: diagrams (mermaid), change stats for visual report (no diffs on report tab).
  */
-const REPORT_SCHEMA_VERSION = 2;
+const REPORT_SCHEMA_VERSION = 3;
 const reportFindingSchema = findingSchema.extend({
     /** Whether this finding was posted as an inline PR comment (vs. skipped). */
     posted: schemas_boolean()
+});
+/** Architecture / flow diagram rendered with Mermaid in the viewer. */
+const reportDiagramSchema = object({
+    title: schemas_string().min(1).max(120),
+    /** Optional short caption under the diagram. */
+    caption: schemas_string().max(400).optional(),
+    /** Mermaid source (flowchart, sequenceDiagram, C4-style flowchart, etc.). */
+    mermaid: schemas_string().min(1).max(5000)
 });
 /**
  * Bird's-eye narrative of the PR itself — what it does, why, and the big-picture
@@ -75709,7 +75718,14 @@ const prOverviewSchema = object({
     /** Explicit major design or implementation decisions visible in the change. */
     majorDecisions: array(schemas_string().min(1).max(500)).max(12),
     /** High-level areas / components touched (e.g. "auth", "pricing API"). */
-    areas: array(schemas_string().min(1).max(80)).max(20)
+    areas: array(schemas_string().min(1).max(80)).max(20),
+    /** Optional architecture / flow diagrams for the visual report. */
+    diagrams: array(reportDiagramSchema).max(3)
+});
+const changeStatsSchema = object({
+    filesChanged: schemas_number().int().min(0),
+    additions: schemas_number().int().min(0),
+    deletions: schemas_number().int().min(0)
 });
 const reportSchema = object({
     schemaVersion: literal(REPORT_SCHEMA_VERSION),
@@ -75728,12 +75744,14 @@ const reportSchema = object({
         author: schemas_string().min(1),
         baseRef: schemas_string().min(1),
         headRef: schemas_string().min(1),
-        // The viewer fetches the exact diff from these SHAs, client-side, from GitHub.
+        // The viewer fetches the exact diff from these SHAs on the PR tab.
         baseSha: schemas_string().min(1),
         headSha: schemas_string().min(1)
     }),
     /** What the PR is about — primary content of the report tab. */
     overview: prOverviewSchema,
+    /** Diff size summary for charts (not the full diff). */
+    changeStats: changeStatsSchema,
     review: object({
         score: schemas_number().min(0).max(5),
         summary: schemas_string().min(1),
@@ -75753,11 +75771,17 @@ const reportSchema = object({
 
 const OVERVIEW_TIMEOUT_MS = 90_000;
 const MAX_OVERVIEW_DIFF_CHARS = 80_000;
+const looseDiagramSchema = object({
+    title: schemas_string(),
+    caption: schemas_string().optional(),
+    mermaid: schemas_string()
+});
 const looseOverviewSchema = object({
     headline: schemas_string(),
     body: schemas_string(),
     majorDecisions: array(schemas_string()).default([]),
-    areas: array(schemas_string()).default([])
+    areas: array(schemas_string()).default([]),
+    diagrams: array(looseDiagramSchema).default([])
 });
 /**
  * Produce a bird's-eye PR report: what the change does, how it fits together,
@@ -75781,7 +75805,7 @@ async function generatePrOverview(input) {
             output: output_exports.object({
                 schema: looseOverviewSchema,
                 name: "pr_overview",
-                description: "Bird's-eye pull request overview: purpose, approach, and major decisions."
+                description: "Bird's-eye pull request overview: purpose, approach, major decisions, and diagrams."
             }),
             system: OVERVIEW_SYSTEM_PROMPT,
             prompt: buildOverviewPrompt(input, diffContext.prompt, diffContext.truncated)
@@ -75789,7 +75813,8 @@ async function generatePrOverview(input) {
         const overview = normalizeOverview(result.output);
         console.log(`Code Beat PR overview complete in ${Date.now() - startedAt}ms: ` +
             `headline chars=${overview.headline.length}, body chars=${overview.body.length}, ` +
-            `decisions=${overview.majorDecisions.length}, areas=${overview.areas.length}`);
+            `decisions=${overview.majorDecisions.length}, areas=${overview.areas.length}, ` +
+            `diagrams=${overview.diagrams.length}`);
         return overview;
     }
     catch (error) {
@@ -75816,29 +75841,40 @@ function buildFallbackOverview(input) {
         headline,
         body: truncate(bodyParts.join("\n\n"), 8000),
         majorDecisions: [],
-        areas
+        areas,
+        diagrams: buildFallbackDiagrams(input.files, areas)
     });
 }
 const OVERVIEW_SYSTEM_PROMPT = `You write pull request overviews for engineering readers.
 
 Your job is a bird's-eye report on the PR itself — not a code review and not a list of bugs.
+The report is rendered as a visual dashboard (metrics, Mermaid diagrams, decision cards). Your
+structured fields power that UI.
 
 Focus on:
 1. **What this PR does** — the purpose and user/system-facing outcome.
 2. **Big picture** — how the pieces fit together; architecture or data-flow when relevant.
-3. **Major decisions** — intentional design/implementation choices visible in the change (APIs, abstractions, trade-offs, migrations, feature flags, etc.).
+3. **Major decisions** — intentional design/implementation choices visible in the change.
 4. **Scope** — what areas are in and out of this change.
+5. **Diagrams** — at least one Mermaid diagram when the change has structure worth showing
+   (data flow, module relationships, request path, state machine, migration steps). Skip only
+   if the PR is a pure rename/typo with no architecture.
 
 Rules:
 - Write for a teammate who has not opened the diff yet.
-- Be concrete and grounded in the title, description, and diff. Do not invent features that are not evidenced.
-- Prefer clarity over marketing tone. No fluff, no "this PR aims to…".
+- Be concrete and grounded in the title, description, and diff. Do not invent features.
+- Prefer clarity over marketing tone. No fluff.
 - Do not list line-level nits, style comments, or review findings.
 - Do not restate the entire diff file-by-file; synthesize.
-- Use markdown in \`body\` (short sections with headings are good).
+- Use markdown in \`body\` (short sections with headings). Do NOT put mermaid fences in body —
+  put diagrams in the \`diagrams\` array instead.
 - \`headline\` is a single sentence (no markdown), max ~200 chars.
 - \`majorDecisions\` are short bullets (one decision each); empty array if none are clear.
-- \`areas\` are short labels for components/domains touched (e.g. "checkout", "auth middleware").`;
+- \`areas\` are short labels for components/domains touched.
+- \`diagrams\` (0–3): each has title, optional caption, and valid Mermaid source.
+  Prefer flowchart TD or sequenceDiagram. Keep diagrams small (≤12 nodes). Use simple
+  node ids (A, B, Auth, Pricing). No HTML/JS in mermaid. Avoid special characters that
+  break Mermaid (use quotes for labels with spaces/parens).`;
 function buildOverviewPrompt(input, diff, truncated) {
     return `Write a bird's-eye overview of this pull request.
 
@@ -75865,12 +75901,59 @@ function normalizeOverview(value) {
     const areas = Array.isArray(input.areas)
         ? uniqueAreas(input.areas.map((item) => truncate(String(item), 80)).filter(Boolean))
         : [];
+    const diagrams = Array.isArray(input.diagrams)
+        ? input.diagrams.map(normalizeDiagram).filter((d) => d !== undefined).slice(0, 3)
+        : [];
     return prOverviewSchema.parse({
         headline: truncate(String(input.headline ?? "Pull request changes"), 240),
         body: truncate(String(input.body ?? "No overview available."), 8000),
         majorDecisions: majorDecisions.slice(0, 12),
-        areas: areas.slice(0, 20)
+        areas: areas.slice(0, 20),
+        diagrams
     });
+}
+function normalizeDiagram(value) {
+    if (value === null || typeof value !== "object") {
+        return undefined;
+    }
+    const input = value;
+    const mermaid = String(input.mermaid ?? "").trim();
+    const title = String(input.title ?? "").trim();
+    if (!mermaid || !title) {
+        return undefined;
+    }
+    const captionRaw = input.caption !== undefined ? String(input.caption).trim() : undefined;
+    return {
+        title: truncate(title, 120),
+        ...(captionRaw ? { caption: truncate(captionRaw, 400) } : {}),
+        mermaid: truncate(mermaid, 5000)
+    };
+}
+function buildFallbackDiagrams(files, areas) {
+    if (files.length === 0) {
+        return [];
+    }
+    const nodes = (areas.length > 0 ? areas : files.map((f) => f.filename.split("/").pop() ?? f.filename))
+        .slice(0, 6)
+        .map((label, index) => {
+        const id = `N${index}`;
+        const safe = label.replace(/["[\]]/g, "");
+        return { id, safe };
+    });
+    if (nodes.length === 0) {
+        return [];
+    }
+    const lines = ["flowchart LR", '  PR["This PR"]'];
+    for (const node of nodes) {
+        lines.push(`  PR --> ${node.id}["${node.safe}"]`);
+    }
+    return [
+        {
+            title: "Areas touched",
+            caption: "Fallback diagram from changed paths (model overview was unavailable).",
+            mermaid: lines.join("\n")
+        }
+    ];
 }
 function createOverviewModel(openrouter, modelName, retryPolicy) {
     const baseModel = openrouter.chat(modelName);
@@ -75898,7 +75981,6 @@ function areaFromPath(path) {
     if (parts.length === 1) {
         return parts[0]?.replace(/\.[^.]+$/, "") || undefined;
     }
-    // Prefer first meaningful directory (skip generic roots).
     const skip = new Set(["src", "lib", "app", "apps", "packages", "test", "tests", "dist"]);
     for (const part of parts.slice(0, -1)) {
         if (!skip.has(part.toLowerCase())) {
@@ -75956,6 +76038,7 @@ function buildReport(args) {
             headSha: args.pullRequest.headSha
         },
         overview: args.overview,
+        changeStats: args.changeStats,
         review: {
             score: args.review.result.score,
             summary: args.review.result.summary,
@@ -75967,6 +76050,14 @@ function buildReport(args) {
     };
     // Validate our own output so a schema drift fails loudly instead of shipping a bad report.
     return reportSchema.parse(report);
+}
+/** Aggregate +/−/file counts for the report's visual stats strip. */
+function buildChangeStats(files) {
+    return {
+        filesChanged: files.length,
+        additions: files.reduce((sum, file) => sum + file.additions, 0),
+        deletions: files.reduce((sum, file) => sum + file.deletions, 0)
+    };
 }
 function findingKey(finding) {
     return `${finding.path}:${finding.line}:${finding.title}`;
@@ -77401,6 +77492,7 @@ async function run() {
                         headSha: pullRequest.head.sha
                     },
                     overview: reportOverview,
+                    changeStats: buildChangeStats(prFiles),
                     review
                 });
                 await publishReport(client, { owner: repoOwner, repo: repoName, branch: reportBranch, report });

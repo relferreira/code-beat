@@ -61,7 +61,8 @@ describe("formatReviewBody", () => {
         headline: "Adds loyalty points accrual and burn for checkout.",
         body: "Long form overview…",
         majorDecisions: ["Integer points only."],
-        areas: ["loyalty", "pricing"]
+        areas: ["loyalty", "pricing"],
+        diagrams: []
       },
       viewerUrl: "https://code-beat.dev/o/r/pull/1"
     });
